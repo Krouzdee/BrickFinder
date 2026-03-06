@@ -6,8 +6,7 @@ class Window(ctk.CTk):
     def __init__(self):
         ctk.CTk.__init__(self)
         self.title("BrickFinder")
-        self.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
-
+        
         self.cap = cv2.VideoCapture(0)
 
         self.input_frame = ctk.CTkFrame(self)
@@ -17,6 +16,8 @@ class Window(ctk.CTk):
         self.video_label.place(relwidth=0.8, relheight=0.5, relx=0.1, rely=0.1)
 
         self.update_frame()
+
+        self.after(0, lambda: self.state('zoomed'))
 
     def update_frame(self):
         ret, frame = self.cap.read()
@@ -28,6 +29,6 @@ class Window(ctk.CTk):
             ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(860, 600))
 
             self.video_label.configure(image=ctk_img)
-
+    
         self.after(16, self.update_frame)
 
