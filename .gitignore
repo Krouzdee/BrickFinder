@@ -6,3 +6,4 @@ ENV/
 
 .vscode/
 .idea/
+obj_video_tracking.py
