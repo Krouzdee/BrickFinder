@@ -4,7 +4,7 @@ import numpy as np
 from ultralytics import YOLO
 from torchvision import models, transforms
 from scipy.spatial.distance import cosine
-from utils.storage import LegoStorage
+from ..utils import LegoStorage
 from PIL import Image
 
 class LegoDetector:
