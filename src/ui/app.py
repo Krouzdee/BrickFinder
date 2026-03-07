@@ -4,7 +4,7 @@ from PIL import Image
 from CTkScrollableDropdownPP import CTkScrollableDropdown
 from pygrabber.dshow_graph import FilterGraph
 from tkinter import filedialog
-from gallery import GalleryWidget
+from .gallery import GalleryWidget
 from ..engine import LegoDetector
 from ..utils import LegoStorage
 
