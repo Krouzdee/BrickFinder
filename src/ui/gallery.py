@@ -1,12 +1,26 @@
 import customtkinter as ctk
 from typing import Optional, Callable
 
-
 class ItemCard(ctk.CTkFrame):
+    """
+    Класс карточки товара для отображения в сетке GalleryWidget.
+    Содержит заголовок, превью изображения и панель управления с тремя кнопками.
+    """
     def __init__(self, master, name: str = "1 ИМЯ", image: Optional[ctk.CTkImage] = None,
                  on_white_click: Optional[Callable] = None,
                  on_green_click: Optional[Callable] = None,
-                 on_red_click: Optional[Callable] = None, **kwargs):
+                 on_red_click: Optional[Callable] = None, **kwargs) -> None:
+        """
+         Создает карточку элемента для галереи деталей.
+        
+         :param master: Родительский виджет.
+         :param name: Название детали.
+         :param image: Изображение детали (CTkImage).
+         :param on_white_click: Обработчик клика по белой кнопке.
+         :param on_green_click: Обработчик клика по зеленой кнопке.
+         :param on_red_click: Обработчик клика по красной кнопке.
+         :param kwargs: Дополнительные параметры для CTkFrame.
+        """
 
         super().__init__(master, **kwargs)
         self.grid_columnconfigure(0, weight=1)
@@ -52,40 +66,73 @@ class ItemCard(ctk.CTkFrame):
 
 
 class GalleryWidget(ctk.CTkScrollableFrame):
+    """
+    Виджет галереи с прокруткой для отображения карточек деталей в сеточной разметке.
+    """
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
         self.grid_columnconfigure((0, 1, 2), weight=1, uniform="col")
         self.items: list[ItemCard] = []
         self.next_num = 1
 
-    def add_item(self, name: Optional[str] = None, image: Optional[ctk.CTkImage] = None, on_white_click: Optional[Callable] = None, on_green_click: Optional[Callable] = None, on_red_click: Optional[Callable] = None) -> ItemCard:
+    def add_item(self, name: Optional[str] = None, image: Optional[ctk.CTkImage] = None,
+                 on_white_click: Optional[Callable] = None,
+                 on_green_click: Optional[Callable] = None,
+                 on_red_click: Optional[Callable] = None) -> ItemCard:
+        """
+        Создает и добавляет новую карточку в галерею.
+
+        :param name: Название детали (если None, генерируется автоматически).
+        :param image: Изображение для отображения на карточке.
+        :param on_white_click: Обработчик клика для белой кнопки.
+        :param on_green_click: Обработчик клика для зеленой кнопки.
+        :param on_red_click: Обработчик клика для красной кнопки.
+        :return: Экземпляр созданной карточки ItemCard.
+        """
         if name is None:
             name = f"{self.next_num} ИМЯ"
             self.next_num += 1
-        card = ItemCard(self, name=name, image=image, on_white_click=on_white_click, on_green_click=on_green_click, on_red_click=on_red_click)
+        card = ItemCard(self, name=name, image=image, on_white_click=on_white_click,
+                        on_green_click=on_green_click, on_red_click=on_red_click)
         self.items.append(card)
         self._refresh_layout()
         return card
 
     def remove_item(self, card: ItemCard) -> None:
+        """
+        Удаляет конкретную карточку из галереи.
+
+        :param card: Объект карточки, который нужно удалить.
+        """
         if card in self.items:
             self.items.remove(card)
             card.destroy()
             self._refresh_layout()
 
     def remove_item_by_index(self, index: int) -> None:
+        """
+        Удаляет карточку по её порядковому индексу.
+
+        :param index: Индекс карточки в списке.
+        """
         if 0 <= index < len(self.items):
             card = self.items.pop(index)
             card.destroy()
             self._refresh_layout()
 
     def clear_all(self) -> None:
+        """
+        Полностью очищает галерею, удаляя все карточки и сбрасывая счетчик имен.
+        """
         for card in self.items[:]:
             card.destroy()
         self.items.clear()
         self.next_num = 1
 
     def _refresh_layout(self):
+        """
+        Пересчитывает позиции карточек в сетке (3 колонки). Внутренний метод.
+        """
         for widget in self.winfo_children():
             if isinstance(widget, ItemCard):
                 widget.grid_forget()
