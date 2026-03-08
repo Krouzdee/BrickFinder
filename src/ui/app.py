@@ -85,14 +85,18 @@ class Window(ctk.CTk):
             values=cameras,
             command=self.change_camera
         )
-        self.camera_option.set(cameras[0])
+        if not cameras:
+            self.camera_option.configure(state="disabled")
+            self.camera_option.set("")
+        else:
+            self.camera_option.set(cameras[0])
 
         self.video_frame = ctk.CTkFrame(
-            self.input_frame,
-            fg_color=self.cget("fg_color"),
-            corner_radius=0,
-            border_color="#1f6aa5",
-            border_width=1
+                self.input_frame,
+                fg_color=self.cget("fg_color"),
+                corner_radius=0,
+                border_color="#1f6aa5",
+                border_width=1
         )
         self.video_frame.place(relwidth=0.9, relheight=0.6, relx=0.05, rely=0.05)
 
@@ -160,8 +164,6 @@ class Window(ctk.CTk):
     def change_status(self) -> None:
         """
         Переключает статус видеопотока (старт/стоп).
-        
-        При включении показывает метку с видео, при выключении скрывает.
         """
         self.status = not self.status
         if self.status:
