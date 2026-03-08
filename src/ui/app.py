@@ -8,6 +8,8 @@ from typing import Optional
 from .gallery import GalleryWidget
 from ..engine import LegoDetector
 from ..utils import LegoStorage
+import platform
+import os
 
 class Window(ctk.CTk):
     def __init__(self) -> None:
@@ -76,7 +78,7 @@ class Window(ctk.CTk):
         self.camera_option = ctk.CTkOptionMenu(self.input_frame, width=200)
         self.camera_option.place(relwidth=0.4, relx=0.3, rely=0.7)
 
-        cameras = FilterGraph().get_input_devices()
+        cameras = self.get_camera_names()
         self.dropdown = CTkScrollableDropdown(
             self.camera_option,
             height=300,
@@ -108,6 +110,27 @@ class Window(ctk.CTk):
 
         self.update_frame()
 
+    @staticmethod
+    def get_camera_names() -> list:
+        camera_names = []
+        system = platform.system()
+    
+        if system == "Windows":
+            graph = FilterGraph()
+            camera_names = graph.get_input_devices()
+    
+        elif system == "Linux":
+            v4l_path = "/sys/class/video4linux/"
+            if os.path.exists(v4l_path):
+                devices = sorted(os.listdir(v4l_path))
+                for device in devices:
+                    name_file = os.path.join(v4l_path, device, "name")
+                    if os.path.exists(name_file):
+                        with open(name_file, "r") as f:
+                            camera_names.append(f.read().strip())
+    
+        return camera_names
+    
     def open_add_detail(self) -> None:
         """
         Открывает модальное окно для добавления новой детали.
