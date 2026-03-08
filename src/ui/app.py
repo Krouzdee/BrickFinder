@@ -2,7 +2,6 @@ import customtkinter as ctk
 import cv2
 from PIL import Image
 from CTkScrollableDropdownPP import CTkScrollableDropdown
-from pygrabber.dshow_graph import FilterGraph
 from tkinter import filedialog
 from typing import Optional
 from .gallery import GalleryWidget
@@ -116,6 +115,7 @@ class Window(ctk.CTk):
         system = platform.system()
     
         if system == "Windows":
+            from pygrabber.dshow_graph import FilterGraph
             graph = FilterGraph()
             camera_names = graph.get_input_devices()
     
