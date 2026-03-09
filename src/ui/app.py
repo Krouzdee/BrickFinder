@@ -10,6 +10,8 @@ from ..utils import LegoStorage
 import platform
 import os
 
+ctk.set_appearance_mode("dark")
+
 class Window(ctk.CTk):
     def __init__(self) -> None:
         """
@@ -29,6 +31,7 @@ class Window(ctk.CTk):
         self.detail_name_entry: Optional[ctk.CTkEntry] = None
         self.add_window: Optional[ctk.CTkToplevel] = None
         self.status: bool = False
+        self.cap = None
         
         self.LegoStorage = LegoStorage()
         self.LegoDetector = LegoDetector()
@@ -37,8 +40,6 @@ class Window(ctk.CTk):
         self.geometry(f"1200x680+{self.center(1200, 680)}")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.resizable(False, False)
-
-        self.cap = cv2.VideoCapture(0)
 
         self.input_frame = ctk.CTkFrame(self, fg_color="#333333")
         self.input_frame.place(relwidth=0.6, relheight=1)
@@ -91,6 +92,7 @@ class Window(ctk.CTk):
             self.camera_option.set("")
         else:
             self.camera_option.set(cameras[0])
+            self.cap = cv2.VideoCapture(0)
 
         self.video_frame = ctk.CTkFrame(
                 self.input_frame,
@@ -140,7 +142,6 @@ class Window(ctk.CTk):
         """
         self.add_window = ctk.CTkToplevel(self)
         self.add_window.wm_transient(self)
-        self.add_window.grab_set()
         self.add_window.title("Добавить деталь")
         self.add_window.geometry("500x400")
         self.add_window.resizable(False, False)
@@ -172,6 +173,9 @@ class Window(ctk.CTk):
             self.add_window.grab_release()
 
         self.add_window.protocol("WM_DELETE_WINDOW", close_popup)
+        
+        self.add_window.update()
+        self.add_window.grab_set()
 
     def change_camera(self, choice: str) -> None:
         """
@@ -179,7 +183,7 @@ class Window(ctk.CTk):
         
         :param choice: Название выбранной камеры из списка доступных
         """
-        if self.cap.isOpened():
+        if self.cap:
             self.cap.release()
         self.cap = cv2.VideoCapture(self.dropdown.values.index(choice))
         self.camera_option.set(choice)
@@ -204,7 +208,7 @@ class Window(ctk.CTk):
         конвертирует в формат для отображения и обновляет метку видео.
         Вызывается каждые 33мс для плавного отображения.
         """
-        if self.cap.isOpened() and self.status:
+        if self.cap and self.status:
             ret, frame = self.cap.read()
             frame = self.LegoDetector.process_frame(frame, self.confidence_slider.get())
             if ret:
@@ -224,7 +228,7 @@ class Window(ctk.CTk):
         
         Конвертирует кадр из BGR в RGB формат и создает PIL изображение.
         """
-        if self.cap.isOpened():
+        if self.cap:
             ret, frame = self.cap.read()
             if ret:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -267,7 +271,7 @@ class Window(ctk.CTk):
         
         Освобождает ресурсы камеры перед завершением работы.
         """
-        if self.cap.isOpened():
+        if self.cap:
             self.cap.release()
         self.destroy()
         
