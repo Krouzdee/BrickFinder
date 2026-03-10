@@ -1,6 +1,7 @@
 import os
 import cv2
 import pickle
+import re
 
 class LegoStorage:
     """
@@ -40,13 +41,14 @@ class LegoStorage:
         Returns:
             str: Путь к сохраненному изображению.
         """
-        if os.path.exists(pkl_path) and not overwrite:
-            return False
 
         safe_name = self.make_safe_name(name)
         img_path = os.path.join(self.base_dir, f"{safe_name}.jpg")
         pkl_path = os.path.join(self.base_dir, f"{safe_name}.pkl")
 
+        if os.path.exists(pkl_path):
+            return False
+    
         cv2.imwrite(img_path, image)
         data = {
             'name': name,
