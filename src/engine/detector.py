@@ -34,6 +34,7 @@ class LegoDetector:
         
         # Текущая цель для поиска
         self.current_target_name = ""
+        self.current_safe_name = ""
         self.target_vector = None
         self.target_color_hist = None
 
@@ -91,7 +92,7 @@ class LegoDetector:
             b = res[0].boxes.xyxy[0].cpu().numpy().astype(int)
             crop = frame[b[1]:b[3], b[0]:b[2]]
         else:
-            return None
+            crop = frame
 
         vector = self.get_vector(crop)
         hist = self.get_color_hist(crop)
@@ -116,8 +117,17 @@ class LegoDetector:
             self.target_vector = data['vector']
             self.target_color_hist = data['hist']
             self.current_target_name = data['name']
+            self.current_safe_name = safe_name 
             return True
         return False
+
+
+    def delete_target(self, safe_name):
+        """
+        Удаляет деталь и сбрасывает текущую цель, если нужно
+        """
+
+        
 
     # Обработка
     def process_frame(self, frame, threshold_percent=70):

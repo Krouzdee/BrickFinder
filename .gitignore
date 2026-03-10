@@ -6,4 +6,5 @@ ENV/
 
 .vscode/
 .idea/
-obj_video_tracking.py
+
+__pycache__
