@@ -91,7 +91,7 @@ class LegoDetector:
             b = res[0].boxes.xyxy[0].cpu().numpy().astype(int)
             crop = frame[b[1]:b[3], b[0]:b[2]]
         else:
-            crop = frame
+            return None
 
         vector = self.get_vector(crop)
         hist = self.get_color_hist(crop)

@@ -1,3 +1,4 @@
+import PIL.Image
 import customtkinter as ctk
 import cv2
 from PIL import Image
@@ -9,6 +10,8 @@ from ..engine import LegoDetector
 from ..utils import LegoStorage
 import platform
 import os
+import numpy as np
+from tkinter.messagebox import showwarning
 
 ctk.set_appearance_mode("dark")
 
@@ -16,12 +19,14 @@ class Window(ctk.CTk):
     def __init__(self) -> None:
         """
         Инициализация главного окна приложения BrickFinder.
-        
+
         Создает основное окно с двумя панелями:
         - Левая панель: видеопоток с камеры и управление распознаванием
         - Правая панель: управление деталями и настройки
         """
         ctk.CTk.__init__(self)
+        self.details = []
+        self.inverted_details = []
         self.captured_pil: Optional[Image.Image] = None
         self.capture_button: Optional[ctk.CTkButton] = None
         self.save_button: Optional[ctk.CTkButton] = None
@@ -32,10 +37,11 @@ class Window(ctk.CTk):
         self.add_window: Optional[ctk.CTkToplevel] = None
         self.status: bool = False
         self.cap = None
-        
+
         self.LegoStorage = LegoStorage()
         self.LegoDetector = LegoDetector()
-        
+        self.get_details()
+
         self.title("BrickFinder")
         self.geometry(f"1200x680+{self.center(1200, 680)}")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -111,16 +117,33 @@ class Window(ctk.CTk):
 
         self.update_frame()
 
+        for detail in self.details:
+            pil_image = PIL.Image.open(os.path.join("data", f"{detail}.jpg"))
+            ctk_image =  ctk.CTkImage(dark_image=pil_image)
+            self.detail_list.add_item(self.details[detail], ctk_image, on_green_click=self.switch_target)
+
+    def get_details(self):
+        self.details = self.LegoStorage.get_available_parts()
+        self.inverted_details = dict(zip(self.details.values(), self.details.keys()))
+
+    def switch_target(self, index) -> None:
+        self.get_details()
+        self.LegoDetector.switch_target(self.inverted_details[self.detail_list.items[index].name])
+
+
     @staticmethod
     def get_camera_names() -> list:
+        """
+        :return: Возвращает список имен камер для Linux и Windows
+        """
         camera_names = []
         system = platform.system()
-    
+
         if system == "Windows":
             from pygrabber.dshow_graph import FilterGraph
             graph = FilterGraph()
             camera_names = graph.get_input_devices()
-    
+
         elif system == "Linux":
             v4l_path = "/sys/class/video4linux/"
             if os.path.exists(v4l_path):
@@ -130,13 +153,13 @@ class Window(ctk.CTk):
                     if os.path.exists(name_file):
                         with open(name_file, "r") as f:
                             camera_names.append(f.read().strip())
-    
+
         return camera_names
-    
+
     def open_add_detail(self) -> None:
         """
         Открывает модальное окно для добавления новой детали.
-        
+
         Создает Toplevel окно с полями для ввода названия детали,
         загрузки изображения и кнопками для управления процессом.
         """
@@ -173,14 +196,14 @@ class Window(ctk.CTk):
             self.add_window.grab_release()
 
         self.add_window.protocol("WM_DELETE_WINDOW", close_popup)
-        
+
         self.add_window.update()
         self.add_window.grab_set()
 
     def change_camera(self, choice: str) -> None:
         """
         Переключает активную камеру на выбранную.
-        
+
         :param choice: Название выбранной камеры из списка доступных
         """
         if self.cap:
@@ -202,30 +225,53 @@ class Window(ctk.CTk):
 
     def update_frame(self) -> None:
         """
-        Обновляет кадр видеопотока в реальном времени.
-        
-        Получает кадр с камеры, обрабатывает его через детектор,
-        конвертирует в формат для отображения и обновляет метку видео.
-        Вызывается каждые 33мс для плавного отображения.
-        """
-        if self.cap and self.status:
-            ret, frame = self.cap.read()
-            frame = self.LegoDetector.process_frame(frame, self.confidence_slider.get())
-            if ret:
-                cv2_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(cv2_image)
+        Обновляет кадр видеопотока в реальном времени с оптимизацией.
 
-                w, h = self.video_label.winfo_width(), self.video_label.winfo_height()
-                if w > 1 and h > 1:
-                    ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(w, h))
-                    self.video_label.configure(image=ctk_img)
+        Использует параллельную обработку: пока текущий кадр отображается,
+        следующий уже обрабатывается в фоне. Это позволяет избежать задержек
+        при тяжелой обработке изображений.
+        """
+        if not (self.cap and self.status):
+            self.after(33, self.update_frame)
+            return
+
+        if hasattr(self, '_next_frame') and self._next_frame is not None:
+            frame_to_show = self._next_frame
+            self._next_frame = None
+        else:
+            ret, frame = self.cap.read()
+            if not ret:
+                self.after(33, self.update_frame)
+                return
+            frame_to_show = self.LegoDetector.process_frame(
+                frame, int(self.confidence_slider.get())
+            )
+
+        cv2_image = cv2.cvtColor(frame_to_show, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(cv2_image)
+        ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(646, 406))
+        self.video_label.configure(image=ctk_img)
+
+        self._next_frame = None
+        self.after_idle(self._process_next_frame)
+
+    def _process_next_frame(self) -> None:
+        """Обрабатывает следующий кадр в фоновом режиме."""
+        if not (self.cap and self.status):
+            return
+
+        ret, frame = self.cap.read()
+        if ret:
+            self._next_frame = self.LegoDetector.process_frame(
+                frame, int(self.confidence_slider.get())
+            )
 
         self.after(33, self.update_frame)
 
     def capture_image(self) -> None:
         """
         Делает снимок с активной камеры и сохраняет его для добавления детали.
-        
+
         Конвертирует кадр из BGR в RGB формат и создает PIL изображение.
         """
         if self.cap:
@@ -239,7 +285,7 @@ class Window(ctk.CTk):
     def upload_image(self) -> None:
         """
         Загружает изображение детали из файловой системы.
-        
+
         Открывает диалог выбора файла и загружает выбранное изображение.
         """
         filename = filedialog.askopenfilename(filetypes=[("Изображение детали лего", "*.jpg *.jpeg *.png *.bmp")])
@@ -249,36 +295,37 @@ class Window(ctk.CTk):
             self.add_preview_label.configure(image=ctk_img, text="")
 
     def save_detail(self) -> None:
-        """
-        Сохраняет новую деталь в галерее.
-        
-        Получает название из поля ввода, создает CTkImage из захваченного
-        изображения и добавляет элемент в галерею деталей.
-        """
         name = self.detail_name_entry.get().strip()
         if not name or not self.captured_pil:
             return
-        if self.captured_pil:
-            photo = ctk.CTkImage(dark_image=self.captured_pil)
-        else:
-            photo = None
-        self.detail_list.add_item(name, photo)
+
+        photo = ctk.CTkImage(dark_image=self.captured_pil)
+
+        image_array = np.array(self.captured_pil)
+        image_array = image_array[:, :, ::-1].copy()
+
+        if not self.LegoDetector.add_new_target(image_array, name):
+            showwarning("Предупреждение", "На изоражении не найдены детали лего")
+            return
+
+        self.detail_list.add_item(name, photo, on_green_click=self.switch_target)
+
         self.add_window.destroy()
 
     def on_close(self) -> None:
         """
         Обработчик закрытия окна приложения.
-        
+
         Освобождает ресурсы камеры перед завершением работы.
         """
         if self.cap:
             self.cap.release()
         self.destroy()
-        
+
     def center(self, x: int, y: int) -> str:
         """
         Вычисляет координаты для центрирования окна на экране.
-    
+
         :param x: Ширина окна.
         :param y: Высота окна.
         :return: Строка геометрии в формате 'X+Y'.
