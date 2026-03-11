@@ -77,7 +77,7 @@ class LegoStorage:
                 return pickle.load(f)
         return None
 
-    def delete_target(self, safe_name):
+    def delete_reference(self, safe_name):
         """
         Удаляет деталь из базы данных.
     

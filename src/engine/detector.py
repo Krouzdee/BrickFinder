@@ -141,9 +141,22 @@ class LegoDetector:
     def delete_target(self, safe_name: str) -> bool:
         """
         Удаляет деталь и сбрасывает текущую цель, если нужно
-        """
-        pass
 
+        Args:
+            safe_name (str): Безопасное имя детали.
+
+        Returns:
+            bool: True если деталь удалилась
+        """
+        success = self.storage.delete_reference(safe_name)
+
+        if success:
+            if safe_name == self.current_safe_name:
+                self.target_vector = None
+                self.target_color_hist = None
+                self.current_target_name = ""
+                self.current_safe_name = ""
+        return success 
 
     def process_frame(self, frame: np.ndarray, threshold_percent: int = 70) -> np.ndarray:
         """
