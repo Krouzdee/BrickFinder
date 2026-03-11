@@ -7,6 +7,7 @@ from torchvision.models import ResNet18_Weights
 from scipy.spatial.distance import cosine
 from ..utils import LegoStorage
 from PIL import Image
+from collections import defaultdict
 
 
 class LegoDetector:
@@ -23,6 +24,9 @@ class LegoDetector:
         """
         self.storage = LegoStorage()
         self.detector = YOLO(yolov8_model_path)
+
+        self.trackers = defaultdict(dict)
+        self.track_id = 0
 
         resnet = models.resnet18(weights=ResNet18_Weights.DEFAULT)
         self.encoder = torch.nn.Sequential(*(list(resnet.children())[:-1]))
@@ -160,7 +164,7 @@ class LegoDetector:
             return frame
         threshold = threshold_percent / 100.0
 
-        results = self.detector.predict(frame, conf=0.25, verbose=False)
+        results = self.detector.track(frame, conf=0.25, persist=True, verbose=False)
 
         if len(results) > 0 and len(results[0].boxes) > 0:
             for box in results[0].boxes:
