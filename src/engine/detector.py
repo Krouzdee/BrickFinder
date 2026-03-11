@@ -13,33 +13,18 @@ class LegoDetector:
     """
     Основной класс компьютерного зрения
     """
-    def __init__(self, yolov8_model_path: str = 'yolov8n.pt', device: Optional[str] = None):
+    def __init__(self, yolov8_model_path: str = 'models/yolov8n.pt'):
         """
         Инициализация детектора.
         Args:
             yolov8_model_path: Путь к предобученной модели YOLOv8.
-            device: Устройство для вычислений ('cuda', 'mps', 'cpu'). Если None, выбирается автоматически.
         """
         self.storage = LegoStorage()
 
-        if device is None:
-            if torch.cuda.is_available():
-                self.device = torch.device('cuda')
-            elif torch.backends.mps.is_available():
-                self.device = torch.device('mps')
-            else:
-                self.device = torch.device('cpu')
-        else:
-            self.device = torch.device(device)
-
-        print(f"Используется устройство: {self.device}")
-
         self.detector = YOLO(yolov8_model_path)
 
-        # Загрузка ResNet на выбранное устройство
         resnet = models.resnet18(weights=ResNet18_Weights.DEFAULT)
         self.encoder = torch.nn.Sequential(*(list(resnet.children())[:-1]))
-        self.encoder = self.encoder.to(self.device)
         self.encoder.eval()
 
         self.transform = transforms.Compose([
