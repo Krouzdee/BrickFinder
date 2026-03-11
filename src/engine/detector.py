@@ -14,9 +14,10 @@ class LegoDetector:
     Основной класс компьютерного зрения
     """
 
-    def __init__(self, yolov8_model_path='models/yolov8n.pt'):
+    def __init__(self, yolov8_model_path='models/lego_detector.pt'):
         """
         Инициализация детектора.
+
         Args:
             yolov8_model_path: Путь к предобученной модели YOLOv8.
         """
