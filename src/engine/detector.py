@@ -7,20 +7,20 @@ from torchvision.models import ResNet18_Weights
 from scipy.spatial.distance import cosine
 from ..utils import LegoStorage
 from PIL import Image
-from typing import Optional, Tuple, List, Union
+
 
 class LegoDetector:
     """
     Основной класс компьютерного зрения
     """
-    def __init__(self, yolov8_model_path: str = 'models/yolov8n.pt'):
+
+    def __init__(self, yolov8_model_path='models/yolov8n.pt'):
         """
         Инициализация детектора.
         Args:
             yolov8_model_path: Путь к предобученной модели YOLOv8.
         """
         self.storage = LegoStorage()
-
         self.detector = YOLO(yolov8_model_path)
 
         resnet = models.resnet18(weights=ResNet18_Weights.DEFAULT)
@@ -33,12 +33,13 @@ class LegoDetector:
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
 
-        self.current_target_name: str = ""
-        self.current_safe_name: str = ""
-        self.target_vector: Optional[np.ndarray] = None
-        self.target_color_hist: Optional[np.ndarray] = None
+        # Текущая цель для поиска
+        self.current_target_name = ""
+        self.current_safe_name = ""
+        self.target_vector = None
+        self.target_color_hist = None
 
-    def get_vector(self, cv2_img: np.ndarray) -> np.ndarray:
+    def get_vector(self, cv2_img):
         """
         Извлекает вектор признаков формы из изображения с помощью ResNet.
 
@@ -47,19 +48,17 @@ class LegoDetector:
 
         Returns:
             numpy.ndarray: Вектор признаков.
-        
+
         """
         img_rgb = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(img_rgb)
         img_t = self.transform(img).unsqueeze(0)
-        img_t = img_t.to(self.device)
 
         with torch.no_grad():
             vec = self.encoder(img_t)
-        return vec.cpu().flatten().numpy()
+        return vec.flatten().numpy()
 
-
-    def get_color_hist(self, cv2_img: np.ndarray) -> np.ndarray:
+    def get_color_hist(self, cv2_img):
         """
         Извлекает гистограмму цвета из изображения в пространстве HSV.
 
@@ -74,8 +73,7 @@ class LegoDetector:
         cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
         return hist
 
-
-    def add_new_target(self, frame: np.ndarray, display_name: str) -> Optional[str]:
+    def add_new_target(self, frame, display_name):
         """
         Добавляет новую деталь в базу на основе загруженного фото.
         Сначала пытается найти объект детектором и вырезать его.
@@ -86,7 +84,7 @@ class LegoDetector:
 
         Returns:
             bool: True, если деталь успешно добавлена.
-        
+
         """
         res = self.detector(frame, conf=0.4, verbose=False)
         if len(res) > 0 and len(res[0].boxes) > 0:
@@ -101,7 +99,7 @@ class LegoDetector:
         img_path = self.storage.save_reference(display_name, crop, vector, hist)
         return img_path
 
-    def switch_target(self, safe_name: str) -> bool:
+    def switch_target(self, safe_name):
         """
         Переключает детектор на поиск новой детали из базы.
         Загружает признаки детали из хранилища и сохраняет их в атрибуты класса.
@@ -122,15 +120,13 @@ class LegoDetector:
             return True
         return False
 
-
-    def delete_target(self, safe_name: str) -> bool:
+    def delete_target(self, safe_name):
         """
         Удаляет деталь и сбрасывает текущую цель, если нужно
         """
-        pass
 
-
-    def process_frame(self, frame: np.ndarray, threshold_percent: int = 70) -> np.ndarray:
+    # Обработка
+    def process_frame(self, frame, threshold_percent=70):
         """
          Главный метод обработки кадра.
         1. Находит все потенциальные объекты на кадре (через YOLO).
