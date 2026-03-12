@@ -2,13 +2,13 @@ import os
 import cv2
 import pickle
 import re
-import numpy as np
 
 
 class LegoStorage:
     """
     Класс для сохранения и загрузки данных о деталях Lego.
-    """  
+    """
+
     def __init__(self, base_dir='data'):
         self.base_dir = base_dir
         if not os.path.exists(self.base_dir):
@@ -16,78 +16,77 @@ class LegoStorage:
 
     def make_safe_name(self, name):
         """
-        Создаёт безопасное имя файла
+        Внутренний метод для создания безопасного имени файла
         """
         forbidden_chars = r'[\\/*?:"<>|]'
         safe = re.sub(forbidden_chars, '_', name)
+
         safe = re.sub(r'[\s-]+', '_', safe)
+
         safe = safe.strip('.')
-        
+
         if not safe:
             safe = "unnamed"
         return safe
 
-    def save_reference(self, name, image, descriptors):
+    def save_reference(self, name, image, vector, hist):
         """
-        Сохраняет деталь в базу.
+        Сохраняет новую эталонную деталь
 
         Args:
-            name (str): Имя детали.
+            name (str): Имя детали, введенное пользователем.
             image (numpy.ndarray): Изображение детали.
-            descriptors (numpy.ndarray): Дескрипторы SIFT.
+            vector (numpy.ndarray): Вектор признаков формы.
+            hist (numpy.ndarray): Гистограмма цвета.
 
         Returns:
-            str: Путь к сохраненному изображению или False
+            str: Путь к сохраненному изображению.
         """
+
         safe_name = self.make_safe_name(name)
         img_path = os.path.join(self.base_dir, f"{safe_name}.jpg")
         pkl_path = os.path.join(self.base_dir, f"{safe_name}.pkl")
 
-        if os.path.exists(pkl_path) or os.path.exists(img_path):
+        if os.path.exists(pkl_path):
             return False
 
         cv2.imwrite(img_path, image)
-
         data = {
             'name': name,
             'safe_name': safe_name,
-            'descriptors': descriptors
+            'vector': vector,
+            'hist': hist
         }
 
         with open(pkl_path, 'wb') as f:
             pickle.dump(data, f)
-            
         return img_path
 
     def load_reference(self, safe_name):
         """
-        Загружает данные детали.
+        Загружает данные детали по ее безопасному имени
 
         Args:
             safe_name (str): Имя файла без расширения.
 
         Returns:
-            dict: Словарь с данными детали или None
+            dict: Словарь с данными детали или None, если файл не найден.
         """
         pkl_path = os.path.join(self.base_dir, f"{safe_name}.pkl")
-        
-        if not os.path.exists(pkl_path):
-            return None
-            
-        with open(pkl_path, 'rb') as f:
-            data = pickle.load(f)
-        
-        return data
+        if os.path.exists(pkl_path):
+            with open(pkl_path, 'rb') as f:
+                return pickle.load(f)
+        return None
 
     def delete_reference(self, safe_name):
         """
         Удаляет деталь из базы данных.
 
         Args:
-            safe_name (str): Безопасное имя детали.
+            safe_name (str): Безопасное имя детали (имя файла без расширения)
 
         Returns:
-            bool: True если удаление успешно
+            bool: True если удаление успешно, False если файлы не найдены
         """
         img_path = os.path.join(self.base_dir, f"{safe_name}.jpg")
         pkl_path = os.path.join(self.base_dir, f"{safe_name}.pkl")
@@ -106,7 +105,7 @@ class LegoStorage:
 
     def get_available_parts(self):
         """
-        Получает список всех сохраненных деталей.
+        Получает список всех сохраненных деталей
 
         Returns:
             dict: Словарь {безопасное_имя: оригинальное_имя}

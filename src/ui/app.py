@@ -11,7 +11,7 @@ from ..utils import LegoStorage
 import platform
 import os
 import numpy as np
-from tkinter.messagebox import showwarning
+from tkinter.messagebox import showwarning, showerror, askyesno
 
 ctk.set_appearance_mode("dark")
 
@@ -120,7 +120,7 @@ class Window(ctk.CTk):
         for detail in self.details:
             pil_image = PIL.Image.open(os.path.join("data", f"{detail}.jpg"))
             ctk_image =  ctk.CTkImage(dark_image=pil_image)
-            self.detail_list.add_item(self.details[detail], ctk_image, on_green_click=self.switch_target)
+            self.detail_list.add_item(self.details[detail], ctk_image, on_green_click=self.switch_target, on_red_click=self.delete_detail)
 
     def get_details(self):
         self.details = self.LegoStorage.get_available_parts()
@@ -130,6 +130,12 @@ class Window(ctk.CTk):
         self.get_details()
         self.LegoDetector.switch_target(self.inverted_details[self.detail_list.items[index].name])
 
+    def delete_detail(self, index):
+        if askyesno("Подтверждение", "Вы действительно хотите удалить деталь из базы?"):
+            if not self.LegoDetector.delete_target(self.inverted_details[self.detail_list.items[index].name]):
+                showerror("Ошибка", "Не удалось удалить деталь из базы.")
+            else:
+                self.detail_list.remove_item_by_index(index)
 
     @staticmethod
     def get_camera_names() -> list:
@@ -266,7 +272,7 @@ class Window(ctk.CTk):
                 frame, int(self.confidence_slider.get())
             )
 
-        self.after(33, self.update_frame)
+        self.after(16, self.update_frame)
 
     def capture_image(self) -> None:
         """
@@ -279,7 +285,9 @@ class Window(ctk.CTk):
             if ret:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 self.captured_pil = Image.fromarray(rgb)
-                ctk_img = ctk.CTkImage(light_image=self.captured_pil, dark_image=self.captured_pil, size=(200,113))
+                max_size = (200, 113)
+                self.captured_pil.thumbnail(max_size, Image.Resampling.LANCZOS)
+                ctk_img = ctk.CTkImage(light_image=self.captured_pil, dark_image=self.captured_pil, size=self.captured_pil.size)
                 self.add_preview_label.configure(image=ctk_img, text="")
 
     def upload_image(self) -> None:
@@ -291,7 +299,9 @@ class Window(ctk.CTk):
         filename = filedialog.askopenfilename(filetypes=[("Изображение детали лего", "*.jpg *.jpeg *.png *.bmp")])
         if filename:
             self.captured_pil = Image.open(filename)
-            ctk_img = ctk.CTkImage(light_image=self.captured_pil, dark_image=self.captured_pil, size=(200,113))
+            max_size = (200, 113)
+            self.captured_pil.thumbnail(max_size, Image.Resampling.LANCZOS)
+            ctk_img = ctk.CTkImage(light_image=self.captured_pil, dark_image=self.captured_pil, size=self.captured_pil.size)
             self.add_preview_label.configure(image=ctk_img, text="")
 
     def save_detail(self) -> None:
@@ -299,7 +309,11 @@ class Window(ctk.CTk):
         if not name or not self.captured_pil:
             return
 
-        photo = ctk.CTkImage(dark_image=self.captured_pil)
+        display_image = self.captured_pil.copy()
+        max_size = (200, 113)
+        display_image.thumbnail(max_size, Image.Resampling.LANCZOS)
+
+        photo = ctk.CTkImage(dark_image=display_image, size=display_image.size)
 
         image_array = np.array(self.captured_pil)
         image_array = image_array[:, :, ::-1].copy()
@@ -308,7 +322,7 @@ class Window(ctk.CTk):
             showwarning("Предупреждение", "На изоражении не найдены детали лего")
             return
 
-        self.detail_list.add_item(name, photo, on_green_click=self.switch_target)
+        self.detail_list.add_item(name, photo, on_green_click=self.switch_target, on_red_click=self.delete_detail)
 
         self.add_window.destroy()
 
