@@ -15,7 +15,7 @@ class LegoDetector:
     Основной класс компьютерного зрения
     """
 
-    def __init__(self, yolov8_model_path='models\lego_detector200.pt'):
+    def __init__(self, yolov8_model_path='models/lego_detector200.pt'):
         """
         Инициализация детектора.
 
@@ -65,17 +65,15 @@ class LegoDetector:
 
     def get_color_hist(self, cv2_img):
         """
-        Извлекает гистограмму цвета из изображения в пространстве HSV.
-
-        Args:
-            cv2_img (numpy.ndarray): Изображение в формате BGR.
-
-        Returns:
-            numpy.ndarray: Нормализованная 2D гистограмма (Hue и Saturation).
+        Извлекает гистограмму только объекта, отсекая темный фон.
         """
         hsv = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2HSV)
-        hist = cv2.calcHist([hsv], [0, 1], None, [180, 256], [0, 180, 0, 256])
-        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+
+        mask = cv2.inRange(hsv, np.array([0, 50, 40]), np.array([180, 255, 255]))
+
+        hist = cv2.calcHist([hsv], [0, 1], mask, [16, 16], [0, 180, 0, 256])
+
+        cv2.normalize(hist, hist, alpha=1, beta=0, norm_type=cv2.NORM_L1)
         return hist
 
     def add_new_target(self, frame, display_name):
@@ -143,15 +141,11 @@ class LegoDetector:
                 self.target_color_hist = None
                 self.current_target_name = ""
                 self.current_safe_name = ""
-        return success 
+        return success
 
     def process_frame(self, frame: np.ndarray, threshold_percent: int = 70) -> np.ndarray:
         """
-         Главный метод обработки кадра.
-        1. Находит все потенциальные объекты на кадре (через YOLO).
-        2. Для каждого объекта извлекает признаки формы и цвета.
-        3. Сравнивает их с признаками текущей цели.
-        4. Рисует рамку, если сходство выше порога.
+        Главный метод обработки кадра.
 
         Args:
             frame (numpy.ndarray): Исходный кадр с камеры.
@@ -162,6 +156,7 @@ class LegoDetector:
         """
         if self.target_vector is None:
             return frame
+
         threshold = threshold_percent / 100.0
 
         results = self.detector.track(frame, conf=0.25, persist=True, verbose=False)
@@ -173,23 +168,34 @@ class LegoDetector:
                 if roi.size == 0:
                     continue
 
-            # Сравнение
-            cur_vec = self.get_vector(roi)
-            shape_sim = 1 - cosine(self.target_vector, cur_vec)
+                cur_vec = self.get_vector(roi)
+                shape_sim = 1 - cosine(self.target_vector, cur_vec)
 
-            cur_hist = self.get_color_hist(roi)
-            color_sim = cv2.compareHist(self.target_color_hist, cur_hist, cv2.HISTCMP_CORREL)
-            color_sim = max(0, color_sim)
+                cur_hist = self.get_color_hist(roi)
 
-            final_sim = (shape_sim * 0.6) + (color_sim * 0.4)
+                color_sim = cv2.compareHist(self.target_color_hist, cur_hist, cv2.HISTCMP_INTERSECT)
 
-            if final_sim >= threshold:
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                final_sim = (shape_sim * 0.5) + (color_sim * 0.5)
 
-                score_text = f"{self.current_target_name} {int(final_sim * 100)}%"
+                if final_sim >= threshold:
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-                cv2.rectangle(frame, (x1, y1 - 25), (x1 + len(score_text) * 10, y1), (0, 255, 0), -1)
+                    score_text = f"{self.current_target_name} {int(final_sim * 100)}%"
 
-                cv2.putText(frame, score_text, (x1 + 5, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    (text_width, text_height), _ = cv2.getTextSize(
+                        score_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+                    )
+
+                    y1_text = max(y1 - text_height - 10, 0)
+
+                    cv2.rectangle(frame,
+                                  (x1, y1_text),
+                                  (x1 + text_width + 10, y1),
+                                  (0, 255, 0), -1)
+
+                    cv2.putText(frame, score_text,
+                                (x1 + 5, y1 - 7),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                                (255, 255, 255), 1)
 
         return frame
