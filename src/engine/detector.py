@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from ultralytics import YOLO
 from torchvision import models, transforms
-from torchvision.models import ResNet18_Weights
+from torchvision.models import ConvNeXt_Tiny_Weights
 from scipy.spatial.distance import cosine
 from ..utils import LegoStorage
 from PIL import Image, ImageDraw, ImageFont
@@ -27,27 +27,31 @@ class LegoDetector:
         self.storage: LegoStorage = LegoStorage()
 
         self.device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
+
         self.detector: YOLO = YOLO(yolov8_model_path)
         if self.device.type == 'cuda':
             self.detector.to('cuda')
 
         self.trackers: defaultdict = defaultdict(dict)
         self.track_id: int = 0
-
-        resnet = models.resnet18(weights=ResNet18_Weights.DEFAULT)
-        self.encoder: torch.nn.Sequential = torch.nn.Sequential(*(list(resnet.children())[:-1]))
+        convnext = models.convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
+        self.encoder: torch.nn.Module = torch.nn.Sequential(
+            convnext.features,
+            convnext.avgpool,
+            torch.nn.Flatten()
+        )
         self.encoder.eval()
         self.encoder.to(self.device)
 
         if self.device.type == 'cuda':
             self.encoder = self.encoder.half()
-
         self.transform: transforms.Compose = transforms.Compose([
-            transforms.Resize((224, 224)),
+            transforms.Resize(232),  # Немного больше 224 для лучшего кропа
+            transforms.CenterCrop(224),
             transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
+
         self.current_target_name: str = ""
         self.current_safe_name: str = ""
         self.target_vector: Optional[np.ndarray] = None
@@ -63,7 +67,6 @@ class LegoDetector:
         self.base_font_path: Optional[str] = None
         for candidate in ("arial.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
             try:
-                # тестовый загрузочный вызов — если сработает, сохраним путь
                 ImageFont.truetype(candidate, 22)
                 self.base_font_path = candidate
                 break
@@ -78,29 +81,30 @@ class LegoDetector:
 
     def get_vector(self, cv2_img: np.ndarray) -> np.ndarray:
         if cv2_img is None or cv2_img.size == 0:
-            return np.zeros(512, dtype=np.float32)
+            return np.zeros(768, dtype=np.float32)  # ConvNeXt Tiny выдает 768-dim вектор
 
         small = cv2.resize(cv2_img, (8, 8), interpolation=cv2.INTER_NEAREST)
         img_hash = hash(small.tobytes())
-    
+
         if img_hash in self.vector_cache:
             return self.vector_cache[img_hash].copy()
+
         img_rgb = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
         img_t = self.transform(Image.fromarray(img_rgb)).unsqueeze(0).to(self.device)
-    
+
         if self.device.type == 'cuda':
             img_t = img_t.half()
-    
+
         with torch.inference_mode():
             vec = self.encoder(img_t)
             vec_np = vec.detach().cpu().float().numpy().flatten()
-        
+
         norm = np.linalg.norm(vec_np)
         if norm > 1e-9:
             vec_np /= norm
         else:
             vec_np = np.zeros_like(vec_np)
-    
+
         self.vector_cache[img_hash] = vec_np
         self._clean_cache()
         return vec_np
@@ -161,9 +165,9 @@ class LegoDetector:
         unique, counts = np.unique(labels, return_counts=True)
         dominant_idx = unique[np.argmax(counts)]
         dominant_color = centers[dominant_idx]
-    
+
         return np.uint8(dominant_color)
-    
+
     def get_color_hist(self, cv2_img: np.ndarray) -> np.ndarray:
         """
         Извлекает гистограмму цвета с использованием доминантного цвета.
@@ -186,7 +190,7 @@ class LegoDetector:
                                np.array([hue + tolerance, 255, 255]))
         hist = cv2.calcHist([hsv], [0, 1], mask, [16, 16], [0, 180, 0, 256])
         cv2.normalize(hist, hist, alpha=1, beta=0, norm_type=cv2.NORM_L1)
-    
+
         return hist
 
 
@@ -271,12 +275,30 @@ class LegoDetector:
                 self.feature_cache.clear()
         return success
 
+    def _score_to_bgr(self, score: float) -> Tuple[int, int, int]:
+        """
+        Преобразует значение уверенности [0..1] в цвет BGR.
+        Интерполирует от красного (низкий) через желтый к зелёному (высокий).
+        """
+        s = float(np.clip(score, 0.0, 1.0))
+        if s <= 0.5:
+            t = s / 0.5
+            r = int(255 * (1 - t) + 255 * t)
+            g = int(0 * (1 - t) + 255 * t)
+            b = 0
+        else:
+            t = (s - 0.5) / 0.5
+            r = int(255 * (1 - t) + 0 * t)
+            g = 255
+            b = 0
+        return (b, g, r)
+
     def _process_single_box(self, box: Any, frame: np.ndarray,
                             target_vector: np.ndarray,
                             target_color_hist: np.ndarray,
                             threshold: float, tid: int, cur_vec: np.ndarray, cur_hist: np.ndarray) -> Optional[Dict]:
         """
-        Обработка одного бокса (вынесено для возможности распараллеливания)
+        Обработка одного бокса (возвращает отдельные компоненты уверенности).
         """
         x1, y1, x2, y2 = map(int, box.xyxy[0])
 
@@ -291,22 +313,22 @@ class LegoDetector:
         roi = frame[y1:y2, x1:x2]
         if roi.size == 0:
             return None
-        
+
         shape_sim = 1.0 - cosine(target_vector, cur_vec)
         shape_sim = float(np.clip(shape_sim, 0.0, 1.0))
 
         color_sim = cv2.compareHist(target_color_hist, cur_hist, cv2.HISTCMP_CORREL)
         color_sim = (color_sim + 1.0) / 2.0
-        if color_sim < 0.3:
-            return None
-    
-        similarity = (shape_sim * 0.4) + (color_sim * 0.6)
-        similarity = float(np.clip(similarity, 0.0, 1.0))
-        if yolo_conf < 0.25:
-            return None
+        color_sim = float(np.clip(color_sim, 0.0, 1.0))
         
-        final_sim = yolo_conf * similarity
+        final_sim = (shape_sim + color_sim) / 2
+        
         final_sim = float(np.clip(final_sim, 0.0, 1.0))
+
+        print(f"[LOG] YOLO: {yolo_conf:.2f} | Shape (Vec+Geom): {shape_sim:.2f} | Color: {color_sim:.2f} => TOTAL: {final_sim:.3f}")
+
+        if yolo_conf < 0.4:
+            return None
 
         if final_sim >= threshold:
             return {
@@ -375,48 +397,48 @@ class LegoDetector:
         """
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img_pil = Image.fromarray(img_rgb).convert("RGBA")
-    
+
         overlay = Image.new("RGBA", img_pil.size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(overlay)
-    
+
         font_size = max(18, frame.shape[0] // 40)
         try:
             font = ImageFont.truetype(self.base_font_path, font_size)
         except Exception:
             font = ImageFont.load_default()
-    
+
         bbox = draw.textbbox((0, 0), text, font=font)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
-    
+
         pad_x = 6
         pad_y = 4
-    
+
         rect_left = x
         rect_right = x + tw + 2 * pad_x
         rect_bottom = y
         rect_top = y - th - 2 * pad_y
-    
+
         if rect_top < 0:
             rect_top = y
             rect_bottom = y + th + 2 * pad_y
-    
+
         bg_r, bg_g, bg_b = int(bg_color[2]), int(bg_color[1]), int(bg_color[0])
         alpha_byte = int(255 * float(np.clip(alpha, 0.0, 1.0)))
-    
+
         draw.rectangle([rect_left, rect_top, rect_right, rect_bottom],
                        fill=(bg_r, bg_g, bg_b, alpha_byte))
-    
+
         text_color = (255, 255, 255, 255)
         text_x = rect_left + pad_x
         text_y = rect_top + pad_y
         draw.text((text_x, text_y), text, font=font, fill=text_color)
-    
+
         out = Image.alpha_composite(img_pil, overlay).convert("RGB")
         out_np = np.array(out)
         out_bgr = cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR)
         return out_bgr
-        
+
     def process_frame(self, frame: np.ndarray, threshold_percent: int = 70) -> np.ndarray:
         """
         Главный метод обработки кадра.
@@ -517,13 +539,14 @@ class LegoDetector:
             x1, y1, x2, y2 = det['coords']
             score = det['score']
             name = det['name']
-        
-            conf_percent = int(score * 100)
+
+            conf_percent = int(round(score * 100))
+
             label = f"{name} {conf_percent}%"
-        
-            box_color = (0, 200, 0)
+
+            box_color = self._score_to_bgr(score)
             cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-        
-            frame = self._draw_label(frame, label, x1, y1, bg_color=(0, 200, 0), alpha=0.65)
-            
+
+            frame = self._draw_label(frame, label, x1, y1, bg_color=box_color, alpha=0.7)
+
         return frame
