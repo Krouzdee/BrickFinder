@@ -6,7 +6,7 @@ from torchvision import models, transforms
 from torchvision.models import ResNet18_Weights
 from scipy.spatial.distance import cosine
 from ..utils import LegoStorage
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from collections import defaultdict
 from typing import Optional, Tuple, Dict, Any, List
 from queue import Queue
@@ -27,7 +27,7 @@ class LegoDetector:
         self.storage: LegoStorage = LegoStorage()
 
         self.device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+        
         self.detector: YOLO = YOLO(yolov8_model_path)
         if self.device.type == 'cuda':
             self.detector.to('cuda')
@@ -48,24 +48,22 @@ class LegoDetector:
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
-
-        # Текущая цель для поиска
         self.current_target_name: str = ""
         self.current_safe_name: str = ""
         self.target_vector: Optional[np.ndarray] = None
         self.target_color_hist: Optional[np.ndarray] = None
-
-        # Кэш для векторов признаков
         self.vector_cache: Dict[Tuple[int, int, int, int], np.ndarray] = {}
         self.cache_size: int = 50
-
-        # Пул потоков для асинхронной обработки
-        self.processing_queue: Queue = Queue(maxsize=5)
+        self.processing_queue: Queue = Queue(maxsize=10)
         self.result_queue: Queue = Queue()
 
         self.feature_cache: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
         self.frame_counter: int = 0
         self.recompute_interval: int = 5
+        try:
+            self.font = ImageFont.truetype("arial.ttf", 22)
+        except Exception:
+            self.font = ImageFont.load_default()
 
     def _clean_cache(self) -> None:
         """Очистка устаревших записей в кэше"""
@@ -74,38 +72,32 @@ class LegoDetector:
             self.vector_cache = dict(items[-self.cache_size // 2:])
 
     def get_vector(self, cv2_img: np.ndarray) -> np.ndarray:
-        """
-        Извлекает вектор признаков формы из изображения с помощью ResNet.
+        if cv2_img is None or cv2_img.size == 0:
+            return np.zeros(512, dtype=np.float32)
 
-        Args:
-            cv2_img (numpy.ndarray): Изображение в формате BGR.
-
-        Returns:
-            numpy.ndarray: Вектор признаков.
-
-        """
-        img_hash = hash(cv2_img.tobytes())
-        cache_key = (img_hash, cv2_img.shape[0], cv2_img.shape[1])
-
-        if cache_key in self.vector_cache:
-            return self.vector_cache[cache_key].copy()
-
+        small = cv2.resize(cv2_img, (8, 8), interpolation=cv2.INTER_NEAREST)
+        img_hash = hash(small.tobytes())
+    
+        if img_hash in self.vector_cache:
+            return self.vector_cache[img_hash].copy()
         img_rgb = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(img_rgb)
-        img_t = self.transform(img).unsqueeze(0)
-
-        img_t = img_t.to(self.device)
+        img_t = self.transform(Image.fromarray(img_rgb)).unsqueeze(0).to(self.device)
+    
         if self.device.type == 'cuda':
             img_t = img_t.half()
-
-        with torch.no_grad():
+    
+        with torch.inference_mode():
             vec = self.encoder(img_t)
-
-        vec_np = vec.flatten().cpu().numpy()
-
-        self.vector_cache[cache_key] = vec_np
+            vec_np = vec.detach().cpu().float().numpy().flatten()
+        
+        norm = np.linalg.norm(vec_np)
+        if norm > 1e-9:
+            vec_np /= norm
+        else:
+            vec_np = np.zeros_like(vec_np)
+    
+        self.vector_cache[img_hash] = vec_np
         self._clean_cache()
-
         return vec_np
 
     def batch_get_vectors(self, rois: List[np.ndarray]) -> List[np.ndarray]:
@@ -129,27 +121,69 @@ class LegoDetector:
         with torch.no_grad():
             vecs = self.encoder(batch_t)
 
-        vecs_np = [vec.flatten().cpu().numpy() for vec in vecs]
+        vecs_np = []
+        for vec in vecs:
+            v = vec.flatten().cpu().numpy()
+            norm = np.linalg.norm(v)
+            if norm > 0:
+                v = v / norm
+            vecs_np.append(v)
         return vecs_np
 
+    def get_dominant_color(self, cv2_img: np.ndarray, k: int = 3) -> np.ndarray:
+        """
+        Находит доминантный цвет изображения с помощью K-means кластеризации.
+        
+        Args:
+            cv2_img: Изображение в формате BGR
+            k: Количество кластеров для K-means
+        
+        Returns:
+            np.ndarray: Доминантный цвет в формате BGR
+        """
+        if cv2_img is None or cv2_img.size == 0:
+            return np.array([0, 0, 0], dtype=np.uint8)
+        hsv = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, np.array([0, 50, 40]), np.array([180, 255, 255]))
+        img_small = cv2.resize(cv2_img, (100, 100), interpolation=cv2.INTER_LINEAR)
+        mask_small = cv2.resize(mask, (100, 100), interpolation=cv2.INTER_NEAREST)
+        pixels = img_small[mask_small > 0].reshape(-1, 3)
+        if len(pixels) < 10:
+            pixels = img_small.reshape(-1, 3)
+        pixels = np.float32(pixels)
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+        _, labels, centers = cv2.kmeans(pixels, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+        unique, counts = np.unique(labels, return_counts=True)
+        dominant_idx = unique[np.argmax(counts)]
+        dominant_color = centers[dominant_idx]
+    
+        return np.uint8(dominant_color)
+    
     def get_color_hist(self, cv2_img: np.ndarray) -> np.ndarray:
         """
-        Извлекает гистограмму только объекта, отсекая темный фон.
+        Извлекает гистограмму цвета с использованием доминантного цвета.
         """
-        h, w = cv2_img.shape[:2]
-        if h * w > 50000:
-            scale = np.sqrt(50000 / (h * w))
-            new_size = (int(w * scale), int(h * scale))
-            cv2_img = cv2.resize(cv2_img, new_size, interpolation=cv2.INTER_LINEAR)
-
+        dominant_color = self.get_dominant_color(cv2_img)
         hsv = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2HSV)
-
-        mask = cv2.inRange(hsv, np.array([0, 50, 40]), np.array([180, 255, 255]))
-
+        dominant_hsv = cv2.cvtColor(np.uint8([[dominant_color]]), cv2.COLOR_BGR2HSV)[0][0]
+        hue = dominant_hsv[0]
+        tolerance = 20
+        if hue - tolerance < 0:
+            mask1 = cv2.inRange(hsv, np.array([0, 50, 40]), np.array([hue + tolerance, 255, 255]))
+            mask2 = cv2.inRange(hsv, np.array([hue - tolerance + 180, 50, 40]), np.array([180, 255, 255]))
+            mask = cv2.bitwise_or(mask1, mask2)
+        elif hue + tolerance > 180:
+            mask1 = cv2.inRange(hsv, np.array([hue - tolerance, 50, 40]), np.array([180, 255, 255]))
+            mask2 = cv2.inRange(hsv, np.array([0, 50, 40]), np.array([hue + tolerance - 180, 255, 255]))
+            mask = cv2.bitwise_or(mask1, mask2)
+        else:
+            mask = cv2.inRange(hsv, np.array([hue - tolerance, 50, 40]),
+                               np.array([hue + tolerance, 255, 255]))
         hist = cv2.calcHist([hsv], [0, 1], mask, [16, 16], [0, 180, 0, 256])
-
         cv2.normalize(hist, hist, alpha=1, beta=0, norm_type=cv2.NORM_L1)
+    
         return hist
+
 
     def add_new_target(self, frame: np.ndarray, display_name: str) -> Optional[str]:
         """
@@ -241,18 +275,33 @@ class LegoDetector:
         """
         x1, y1, x2, y2 = map(int, box.xyxy[0])
 
+        try:
+            yolo_conf = float(box.conf)
+        except Exception:
+            yolo_conf = 1.0
+
         if (y2 - y1) < 10 or (x2 - x1) < 10:
             return None
 
         roi = frame[y1:y2, x1:x2]
         if roi.size == 0:
             return None
+        
+        shape_sim = 1.0 - cosine(target_vector, cur_vec)
+        shape_sim = float(np.clip(shape_sim, 0.0, 1.0))
 
-        shape_sim = 1 - cosine(target_vector, cur_vec)
-
-        color_sim = 1 - cv2.compareHist(target_color_hist, cur_hist, cv2.HISTCMP_BHATTACHARYYA)
-
-        final_sim = (shape_sim * 0.8) + (color_sim * 0.2)
+        color_sim = cv2.compareHist(target_color_hist, cur_hist, cv2.HISTCMP_CORREL)
+        color_sim = (color_sim + 1.0) / 2.0
+        if color_sim < 0.3:
+            return None
+    
+        similarity = (shape_sim * 0.4) + (color_sim * 0.6)
+        similarity = float(np.clip(similarity, 0.0, 1.0))
+        if yolo_conf < 0.25:
+            return None
+        
+        final_sim = yolo_conf * similarity
+        final_sim = float(np.clip(final_sim, 0.0, 1.0))
 
         if final_sim >= threshold:
             return {
@@ -261,6 +310,33 @@ class LegoDetector:
                 'name': self.current_target_name
             }
         return None
+
+    def draw_label(self, frame: np.ndarray, text: str, x: int, y: int) -> np.ndarray:
+        """
+        Рисует читаемую подпись с поддержкой русского языка.
+        """
+        img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(img_pil)
+
+        bbox = draw.textbbox((0, 0), text, font=self.font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+
+        padding = 6
+
+        y_top = max(y - text_h - padding * 2, 0)
+
+        rect_x0 = x
+        rect_y0 = y_top
+        rect_x1 = x + text_w + padding * 2
+        rect_y1 = y
+
+        draw.rectangle([rect_x0, rect_y0, rect_x1, rect_y1], fill=(0, 160, 0))
+
+        draw.text((x + padding, rect_y0 + padding // 2), text, font=self.font, fill=(255, 255, 255))
+
+        result = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+        return result
 
     def process_frame(self, frame: np.ndarray, threshold_percent: int = 70) -> np.ndarray:
         """
@@ -290,7 +366,7 @@ class LegoDetector:
             scale = 1.0
 
         results = list(self.detector.track(frame_small, conf=0.25, persist=True,
-                                      verbose=False, stream=True))
+                                           verbose=False, stream=True))
 
         detected_boxes: List[Dict] = []
 
@@ -316,7 +392,14 @@ class LegoDetector:
                         vecs[i], hists[i] = self.feature_cache[tid]
                     else:
                         x1, y1, x2, y2 = map(int, boxes[i].xyxy[0])
-                        roi = frame_small[y1:y2, x1:x2]
+                        pad = 8
+                        x1p = max(0, x1 - pad); y1p = max(0, y1 - pad)
+                        x2p = min(frame_small.shape[1], x2 + pad); y2p = min(frame_small.shape[0], y2 + pad)
+                        roi = frame_small[y1p:y2p, x1p:x2p]
+                        if roi.size == 0:
+                            vecs[i] = None
+                            hists[i] = None
+                            continue
                         new_rois.append(roi)
                         new_tids.append(tid)
 
@@ -332,6 +415,8 @@ class LegoDetector:
 
                 for i, box in enumerate(boxes):
                     tid = tids[i]
+                    if vecs[i] is None or hists[i] is None:
+                        continue
                     result = self._process_single_box(box, frame_small,
                                                       target_vector,
                                                       target_color_hist,
@@ -357,20 +442,6 @@ class LegoDetector:
 
             score_text = f"{box_data['name']} {int(final_sim * 100)}%"
 
-            (text_width, text_height), _ = cv2.getTextSize(
-                score_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
-            )
-
-            y1_text = max(y1 - text_height - 10, 0)
-
-            cv2.rectangle(frame,
-                          (x1, y1_text),
-                          (x1 + text_width + 10, y1),
-                          (0, 255, 0), -1)
-
-            cv2.putText(frame, score_text,
-                        (x1 + 5, y1 - 7),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                        (255, 255, 255), 1)
+            frame = self.draw_label(frame, score_text, x1, max(y1 - 5, 0))
 
         return frame
