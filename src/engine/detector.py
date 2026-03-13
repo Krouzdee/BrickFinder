@@ -60,10 +60,15 @@ class LegoDetector:
         self.feature_cache: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
         self.frame_counter: int = 0
         self.recompute_interval: int = 5
-        try:
-            self.font = ImageFont.truetype("arial.ttf", 22)
-        except Exception:
-            self.font = ImageFont.load_default()
+        self.base_font_path: Optional[str] = None
+        for candidate in ("arial.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+            try:
+                # тестовый загрузочный вызов — если сработает, сохраним путь
+                ImageFont.truetype(candidate, 22)
+                self.base_font_path = candidate
+                break
+            except Exception:
+                continue
 
     def _clean_cache(self) -> None:
         """Очистка устаревших записей в кэше"""
@@ -314,30 +319,104 @@ class LegoDetector:
     def draw_label(self, frame: np.ndarray, text: str, x: int, y: int) -> np.ndarray:
         """
         Рисует читаемую подпись с поддержкой русского языка.
+        Динамически подбирает размер шрифта и рисует полупрозрачный фон + обводку.
         """
-        img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        draw = ImageDraw.Draw(img_pil)
+        img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).convert("RGBA")
+        font_size = 100
 
-        bbox = draw.textbbox((0, 0), text, font=self.font)
+        if self.base_font_path:
+            try:
+                font = ImageFont.truetype(self.base_font_path, font_size)
+            except Exception:
+                font = ImageFont.load_default()
+        else:
+            font = ImageFont.load_default()
+
+        overlay = Image.new("RGBA", img_pil.size, (255, 255, 255, 0))
+        draw_overlay = ImageDraw.Draw(overlay)
+
+        bbox = draw_overlay.textbbox((0, 0), text, font=font, stroke_width=max(1, font_size // 18))
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
 
-        padding = 6
+        padding = max(6, int(font_size * 0.3))
 
         y_top = max(y - text_h - padding * 2, 0)
 
         rect_x0 = x
         rect_y0 = y_top
-        rect_x1 = x + text_w + padding * 2
-        rect_y1 = y
+        rect_x1 = min(img_pil.size[0], x + text_w + padding * 2)
+        rect_y1 = min(img_pil.size[1], y)
 
-        draw.rectangle([rect_x0, rect_y0, rect_x1, rect_y1], fill=(0, 160, 0))
+        bg_fill = (0, 160, 0, 200)
+        draw_overlay.rectangle([rect_x0, rect_y0, rect_x1, rect_y1], fill=bg_fill, outline=None)
 
-        draw.text((x + padding, rect_y0 + padding // 2), text, font=self.font, fill=(255, 255, 255))
+        composed = Image.alpha_composite(img_pil, overlay)
 
-        result = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+        draw_final = ImageDraw.Draw(composed)
+        text_pos = (x + padding, rect_y0 + padding // 2)
+        stroke_w = max(1, font_size // 18)
+
+        draw_final.text(text_pos, text, font=font, fill=(255, 255, 255, 255),
+                        stroke_width=stroke_w, stroke_fill=(0, 0, 0, 255))
+
+        result = cv2.cvtColor(np.array(composed.convert("RGB")), cv2.COLOR_RGB2BGR)
         return result
 
+    def _draw_label(self, frame: np.ndarray, text: str, x: int, y: int,
+                    bg_color: Tuple[int, int, int] = (0, 200, 0), alpha: float = 0.6) -> np.ndarray:
+        """
+        Рисует полупрозрачный зелёный фон и белый текст (поддерживается кириллица).
+        frame: входной кадр в формате BGR (OpenCV)
+        text: строка для вывода
+        x, y: левый нижний угол (x, y) рамки — текст будет размещён над этим y
+        bg_color: фон (B, G, R)
+        alpha: прозрачность фона [0..1]
+        """
+        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img_pil = Image.fromarray(img_rgb).convert("RGBA")
+    
+        overlay = Image.new("RGBA", img_pil.size, (255, 255, 255, 0))
+        draw = ImageDraw.Draw(overlay)
+    
+        font_size = max(18, frame.shape[0] // 40)
+        try:
+            font = ImageFont.truetype(self.base_font_path, font_size)
+        except Exception:
+            font = ImageFont.load_default()
+    
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+    
+        pad_x = 6
+        pad_y = 4
+    
+        rect_left = x
+        rect_right = x + tw + 2 * pad_x
+        rect_bottom = y
+        rect_top = y - th - 2 * pad_y
+    
+        if rect_top < 0:
+            rect_top = y
+            rect_bottom = y + th + 2 * pad_y
+    
+        bg_r, bg_g, bg_b = int(bg_color[2]), int(bg_color[1]), int(bg_color[0])
+        alpha_byte = int(255 * float(np.clip(alpha, 0.0, 1.0)))
+    
+        draw.rectangle([rect_left, rect_top, rect_right, rect_bottom],
+                       fill=(bg_r, bg_g, bg_b, alpha_byte))
+    
+        text_color = (255, 255, 255, 255)
+        text_x = rect_left + pad_x
+        text_y = rect_top + pad_y
+        draw.text((text_x, text_y), text, font=font, fill=text_color)
+    
+        out = Image.alpha_composite(img_pil, overlay).convert("RGB")
+        out_np = np.array(out)
+        out_bgr = cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR)
+        return out_bgr
+        
     def process_frame(self, frame: np.ndarray, threshold_percent: int = 70) -> np.ndarray:
         """
         Главный метод обработки кадра.
@@ -434,14 +513,17 @@ class LegoDetector:
                 current_tids = set(tids)
                 self.feature_cache = {k: v for k, v in self.feature_cache.items() if k in current_tids}
 
-        for box_data in detected_boxes:
-            x1, y1, x2, y2 = box_data['coords']
-            final_sim = box_data['score']
-
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            score_text = f"{box_data['name']} {int(final_sim * 100)}%"
-
-            frame = self.draw_label(frame, score_text, x1, max(y1 - 5, 0))
-
+        for det in detected_boxes:
+            x1, y1, x2, y2 = det['coords']
+            score = det['score']
+            name = det['name']
+        
+            conf_percent = int(score * 100)
+            label = f"{name} {conf_percent}%"
+        
+            box_color = (0, 200, 0)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
+        
+            frame = self._draw_label(frame, label, x1, y1, bg_color=(0, 200, 0), alpha=0.65)
+            
         return frame
