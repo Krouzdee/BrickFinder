@@ -29,35 +29,35 @@ class LegoStorage:
             safe = "unnamed"
         return safe
 
-    def save_reference(self, name, image, vector, hist):
+    def save_reference(self, name, image, vector, color_hist):
         """
-        Сохраняет новую эталонную деталь
-
+        Сохраняет новую эталонную деталь с гистограммой цвета
+        
         Args:
-            name (str): Имя детали, введенное пользователем.
-            image (numpy.ndarray): Изображение детали.
-            vector (numpy.ndarray): Вектор признаков формы.
-            hist (numpy.ndarray): Гистограмма цвета.
-
+            name (str): Имя детали
+            image (numpy.ndarray): Изображение детали
+            vector (numpy.ndarray): Вектор признаков формы
+            color_hist (numpy.ndarray): Гистограмма цвета
+    
         Returns:
-            str: Путь к сохраненному изображению.
+            str: Путь к сохраненному изображению или False если ошибка
         """
-
+    
         safe_name = self.make_safe_name(name)
         img_path = os.path.join(self.base_dir, f"{safe_name}.jpg")
         pkl_path = os.path.join(self.base_dir, f"{safe_name}.pkl")
-
+    
         if os.path.exists(pkl_path):
             return False
-
+    
         cv2.imwrite(img_path, image)
         data = {
             'name': name,
             'safe_name': safe_name,
             'vector': vector,
-            'hist': hist
+            'color_hist': color_hist
         }
-
+    
         with open(pkl_path, 'wb') as f:
             pickle.dump(data, f)
         return img_path
