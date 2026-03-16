@@ -1,5 +1,6 @@
 import customtkinter as ctk
 from typing import Optional, Callable, List
+from PIL import Image
 
 
 class ItemCard(ctk.CTkFrame):
@@ -53,8 +54,24 @@ class ItemCard(ctk.CTkFrame):
         self.png_label.pack(expand=True, fill="both")
 
         if image:
-            image.configure(size=(89, 50))
-            self.png_label.configure(image=image)
+            max_w, max_h = 100, 50
+
+            orig_w, orig_h = image._dark_image.size
+
+            ratio = min(max_w / orig_w, max_h / orig_h, 1.0)
+
+            new_w = int(orig_w * ratio)
+            new_h = int(orig_h * ratio)
+            resized_img = image._dark_image.resize(
+                (new_w, new_h),
+                Image.Resampling.LANCZOS
+            )
+            display_image = ctk.CTkImage(
+                dark_image=resized_img,
+                size=(new_w, new_h)
+            )
+
+            self.png_label.configure(image=display_image)
         else:
             self.png_label.configure(text="png")
 
@@ -66,38 +83,29 @@ class ItemCard(ctk.CTkFrame):
         self._on_green = on_green_click
         self._on_red   = on_red_click
 
-        self.white_btn = ctk.CTkButton(
-            self.buttons_frame,
-            text="",
-            width=34,
-            height=20,
-            fg_color="white",
-            hover_color="#E6E6E6",
-            command=self._call_white,
-        )
-        self.white_btn.grid(row=0, column=0, padx=6)
-
         self.green_btn = ctk.CTkButton(
             self.buttons_frame,
-            text="",
-            width=34,
-            height=20,
+            text="✔",
+            font=("MaterialIconsOutlined-Regular", 15),
+            width=20,
+            height=25,
             fg_color="#00CC00",
             hover_color="#00AA00",
             command=self._call_green,
         )
-        self.green_btn.grid(row=0, column=1, padx=6)
+        self.green_btn.grid(row=0, column=0, padx=6)
 
         self.red_btn = ctk.CTkButton(
             self.buttons_frame,
-            text="",
-            width=34,
-            height=20,
+            text="❌",
+            font=("MaterialIconsOutlined-Regular", 12),
+            width=20,
+            height=25,
             fg_color="#FF3333",
             hover_color="#CC2222",
             command=self._call_red,
         )
-        self.red_btn.grid(row=0, column=2, padx=6)
+        self.red_btn.grid(row=0, column=1, padx=6)
 
 
     def set_index(self, index: int) -> None:

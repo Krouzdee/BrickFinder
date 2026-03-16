@@ -37,6 +37,7 @@ class Window(ctk.CTk):
         self.add_window: Optional[ctk.CTkToplevel] = None
         self.status: bool = False
         self.cap = None
+        self.update_job: Optional[int] = None
 
         self.LegoStorage = LegoStorage()
         self.LegoDetector = LegoDetector()
@@ -47,7 +48,7 @@ class Window(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.resizable(False, False)
 
-        self.input_tabs = ctk.CTkTabview(self, command=self.on_tab_change)
+        self.input_tabs = ctk.CTkTabview(self, bg_color="#2b2b2b")
         self.input_tabs.place(relwidth=0.6, relheight=1)
 
         self.tab_camera = self.input_tabs.add("Камера")
@@ -66,6 +67,9 @@ class Window(ctk.CTk):
 
         self.detail_list = GalleryWidget(self.right_frame)
         self.detail_list.place(relwidth=0.9, relheight=0.35, rely=0.17, relx=0.05)
+
+        self.target_label = ctk.CTkLabel(self.right_frame, text="Текущая цель для поиска:", font=("Arial", 12, "bold"))
+        self.target_label.place(rely=0.52, relx=0.05)
 
         settings_label = ctk.CTkLabel(self.right_frame, text="Настройки распознавания", font=("Arial", 16, "bold"))
         settings_label.place(relx=0.5, rely=0.65, anchor="n")
@@ -113,7 +117,6 @@ class Window(ctk.CTk):
         self.video_frame.place(relwidth=0.9, relheight=0.6, relx=0.05, rely=0.05)
 
         self.video_label = ctk.CTkLabel(self.video_frame, text="", width=646, height=406)
-        self.video_label.place()
 
         self.status_button = ctk.CTkButton(self.tab_camera, command=self.change_status, text="Старт")
         self.status_button.place(relwidth=0.2, relheight=0.05, relx=0.4, rely=0.8)
@@ -137,12 +140,6 @@ class Window(ctk.CTk):
             pil_image = PIL.Image.open(os.path.join("data", f"{detail}.jpg"))
             ctk_image =  ctk.CTkImage(dark_image=pil_image)
             self.detail_list.add_item(self.details[detail], ctk_image, on_green_click=self.switch_target, on_red_click=self.delete_detail)
-
-    def on_tab_change(self) -> None:
-        """Срабатывает при переключении между вкладками Камера/Изображение"""
-        current_tab = self.input_tabs.get()
-        if current_tab == "Изображение" and self.status:
-            self.change_status()
 
     def load_static_image(self) -> None:
         """Загружает статичное изображение для вкладки 'Изображение'"""
@@ -170,7 +167,6 @@ class Window(ctk.CTk):
         self.inverted_details = dict(zip(self.details.values(), self.details.keys()))
 
     def switch_target(self, index) -> None:
-        self.get_details()
         self.LegoDetector.switch_target(self.inverted_details[self.detail_list.items[index].name])
         if hasattr(self, 'input_tabs') and self.input_tabs.get() == "Изображение":
             self.process_static_image()
@@ -181,6 +177,7 @@ class Window(ctk.CTk):
                 showerror("Ошибка", "Не удалось удалить деталь из базы.")
             else:
                 self.detail_list.remove_item_by_index(index)
+                self.get_details()
 
     @staticmethod
     def get_camera_names() -> list:
@@ -213,7 +210,7 @@ class Window(ctk.CTk):
 
         ctk.CTkLabel(self.add_window, text="Название детали:", font=("Arial", 12)).place(relx=0.1, rely=0.1)
 
-        self.detail_name_entry = ctk.CTkEntry(self.add_window, placeholder_text="Например: Синий кирпич 2х4")
+        self.detail_name_entry = ctk.CTkEntry(self.add_window, placeholder_text="Не более 50 символов")
         self.detail_name_entry.place(relwidth=0.8, relx=0.1, rely=0.2)
 
         ctk.CTkLabel(self.add_window, text="Изображение детали:", font=("Arial", 12)).place(relx=0.1, rely=0.35)
@@ -253,46 +250,36 @@ class Window(ctk.CTk):
         if self.status:
             self.video_label.place(x=0, y=0)
             self.status_button.configure(text="Стоп")
+            self.update_frame()
         else:
             self.video_label.place_forget()
             self.status_button.configure(text="Старт")
+            if self.update_job is not None:
+                self.after_cancel(self.update_job)
+                self.update_job = None
 
     def update_frame(self) -> None:
+        """Основной цикл обновления камеры (30 fps)"""
         if not (self.cap and self.status):
-            self.after(33, self.update_frame)
+            self.update_job = None
             return
 
-        if hasattr(self, '_next_frame') and self._next_frame is not None:
-            frame_to_show = self._next_frame
-            self._next_frame = None
-        else:
-            ret, frame = self.cap.read()
-            if not ret:
-                self.after(33, self.update_frame)
-                return
-            frame_to_show = self.LegoDetector.process_frame(
-                frame, int(self.confidence_slider.get())
-            )
+        ret, frame = self.cap.read()
+        if not ret:
+            self.update_job = self.after(33, self.update_frame)
+            return
+
+        frame_to_show = self.LegoDetector.process_frame(
+            frame, int(self.confidence_slider.get())
+        )
 
         cv2_image = cv2.cvtColor(frame_to_show, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(cv2_image)
         ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(646, 406))
+
         self.video_label.configure(image=ctk_img)
 
-        self._next_frame = None
-        self.after_idle(self._process_next_frame)
-
-    def _process_next_frame(self) -> None:
-        if not (self.cap and self.status):
-            return
-
-        ret, frame = self.cap.read()
-        if ret:
-            self._next_frame = self.LegoDetector.process_frame(
-                frame, int(self.confidence_slider.get())
-            )
-
-        self.after(16, self.update_frame)
+        self.update_job = self.after(16, self.update_frame)
 
     def capture_image(self) -> None:
         if self.cap:
@@ -321,20 +308,20 @@ class Window(ctk.CTk):
         if not name or not self.captured_pil:
             return
 
-        display_image = self.captured_pil.copy()
-        max_size = (200, 113)
-        display_image.thumbnail(max_size, Image.Resampling.LANCZOS)
-
-        photo = ctk.CTkImage(dark_image=display_image, size=display_image.size)
-
         image_array = np.array(self.captured_pil)
         image_array = image_array[:, :, ::-1].copy()
 
+        self.captured_pil = None
+
         if not self.LegoDetector.add_new_target(image_array, name):
-            showwarning("Предупреждение", "На изображении не найдены детали лего")
+            showwarning("Предупреждение", "Деталь с таким именем уже существует в базе")
             return
 
-        self.detail_list.add_item(name, photo, on_green_click=self.switch_target, on_red_click=self.delete_detail)
+        self.get_details()
+        pil_image = PIL.Image.open(os.path.join("data", f"{self.inverted_details[name]}.jpg"))
+        ctk_image = ctk.CTkImage(dark_image=pil_image)
+
+        self.detail_list.add_item(name, ctk_image, on_green_click=self.switch_target, on_red_click=self.delete_detail)
 
         self.add_window.destroy()
 
