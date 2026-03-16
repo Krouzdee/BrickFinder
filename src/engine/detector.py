@@ -22,7 +22,7 @@ class LegoDetector:
         Инициализация детектора.
 
         Args:
-            yolov8_model_path: Путь к предобученной модели YOLOv8.
+            yolov8_model_path: Путь к предобученной модели.
         """
         self.storage: LegoStorage = LegoStorage()
 
@@ -46,7 +46,7 @@ class LegoDetector:
         if self.device.type == 'cuda':
             self.encoder = self.encoder.half()
         self.transform: transforms.Compose = transforms.Compose([
-            transforms.Resize(232),  # Немного больше 224 для лучшего кропа
+            transforms.Resize(232),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -81,7 +81,7 @@ class LegoDetector:
 
     def get_vector(self, cv2_img: np.ndarray) -> np.ndarray:
         if cv2_img is None or cv2_img.size == 0:
-            return np.zeros(768, dtype=np.float32)  # ConvNeXt Tiny выдает 768-dim вектор
+            return np.zeros(768, dtype=np.float32)
 
         small = cv2.resize(cv2_img, (8, 8), interpolation=cv2.INTER_NEAREST)
         img_hash = hash(small.tobytes())
@@ -111,7 +111,7 @@ class LegoDetector:
 
     def batch_get_vectors(self, rois: List[np.ndarray]) -> List[np.ndarray]:
         """
-        Batch extraction of feature vectors for multiple ROIs.
+        Групповая обработка векторов признаков для нескольких обнаруженных объектов.
         """
         if not rois:
             return []
@@ -274,6 +274,25 @@ class LegoDetector:
                 self.vector_cache.clear()
                 self.feature_cache.clear()
         return success
+
+    def reset_target(self, safe_name) -> bool:
+        """
+        Сбрасывает текущую цель поиска.
+
+        Args:
+            safe_name (str): Безопасное имя детали.
+
+        Returns:
+            bool: True если деталь удалилась
+        """
+
+        self.target_vector = None
+        self.target_color_hist = None
+        self.current_target_name = ""
+        self.current_safe_name = ""
+        self.vector_cache.clear()
+        self.feature_cache.clear()
+        return True
 
     def _score_to_bgr(self, score: float) -> Tuple[int, int, int]:
         """
@@ -466,7 +485,7 @@ class LegoDetector:
             frame_small = frame
             scale = 1.0
 
-        results = list(self.detector.track(frame_small, conf=0.25, persist=True,
+        results = list(self.detector.track(frame_small, conf=0.7, persist=True,
                                            verbose=False, stream=True))
 
         detected_boxes: List[Dict] = []
