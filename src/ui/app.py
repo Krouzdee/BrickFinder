@@ -71,6 +71,26 @@ class Window(ctk.CTk):
         self.target_label = ctk.CTkLabel(self.right_frame, text="Текущая цель для поиска:", font=("Arial", 12, "bold"))
         self.target_label.place(rely=0.52, relx=0.05)
 
+        self.current_target_display = ctk.CTkLabel(
+            self.right_frame, 
+            text="Не выбрана", 
+            font=("Arial", 14, "bold"),
+            text_color="#9E9E9E" 
+        )
+        self.current_target_display.place(rely=0.56, relx=0.05)
+
+        self.reset_target_button = ctk.CTkButton(
+        self.right_frame,
+        text="Сбросить цель",
+        command=self.reset_current_target,
+        fg_color="#FF3333", 
+        hover_color="#FF3333",
+        width=120,
+        height=30,
+        font=("Arial", 11)
+        )
+        self.reset_target_button.place(rely=0.56, relx=0.55)
+
         settings_label = ctk.CTkLabel(self.right_frame, text="Настройки распознавания", font=("Arial", 16, "bold"))
         settings_label.place(relx=0.5, rely=0.65, anchor="n")
 
@@ -168,11 +188,33 @@ class Window(ctk.CTk):
 
     def switch_target(self, index) -> None:
         self.LegoDetector.switch_target(self.inverted_details[self.detail_list.items[index].name])
-        if hasattr(self, 'input_tabs') and self.input_tabs.get() == "Изображение":
-            self.process_static_image()
+    
+        self.current_target_display.configure(
+            text=self.detail_list.items[index].name,
+            text_color="#246ca6"
+        )
+
+    def reset_current_target(self) -> None:
+        """Сбрасывает текущую выбранную цель."""
+        if hasattr(self, 'LegoDetector'):
+            if self.LegoDetector.reset_target(""):
+                self.current_target_display.configure(
+                    text="Не выбрана",
+                    text_color="#9E9E9E" 
+                )
 
     def delete_detail(self, index):
         if askyesno("Подтверждение", "Вы действительно хотите удалить деталь из базы?"):
+            detail_name = self.detail_list.items[index].name
+            safe_name = self.inverted_details.get(detail_name)
+
+            current_text = self.current_target_display.cget("text")
+            if current_text == detail_name:
+                self.current_target_display.configure(
+                    text="Не выбрана",
+                    text_color="#9E9E9E"
+                )
+        
             if not self.LegoDetector.delete_target(self.inverted_details[self.detail_list.items[index].name]):
                 showerror("Ошибка", "Не удалось удалить деталь из базы.")
             else:
