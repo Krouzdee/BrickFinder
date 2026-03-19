@@ -193,11 +193,13 @@ class Window(ctk.CTk):
             text=self.detail_list.items[index].name,
             text_color="#246ca6"
         )
+        if self.input_tabs.get() == "Изображение":
+            self.process_static_image()
 
     def reset_current_target(self) -> None:
         """Сбрасывает текущую выбранную цель."""
         if hasattr(self, 'LegoDetector'):
-            if self.LegoDetector.reset_target(""):
+            if self.LegoDetector.reset_target():
                 self.current_target_display.configure(
                     text="Не выбрана",
                     text_color="#9E9E9E" 
@@ -206,7 +208,7 @@ class Window(ctk.CTk):
     def delete_detail(self, index):
         if askyesno("Подтверждение", "Вы действительно хотите удалить деталь из базы?"):
             detail_name = self.detail_list.items[index].name
-            safe_name = self.inverted_details.get(detail_name)
+            safe_name = self.inverted_details[detail_name]
 
             current_text = self.current_target_display.cget("text")
             if current_text == detail_name:
