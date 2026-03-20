@@ -72,28 +72,20 @@ class LegoDetector:
     @staticmethod
     def get_color_histogram(cv2_img: np.ndarray) -> np.ndarray:
         """
-        Быстрое извлечение гистограммы цвета (оптимизированная версия)
+        Извлекает 3D гистограмму цвета для сравнения через корреляцию.
         
         Args:
             cv2_img: Изображение в формате BGR
-            
+        
         Returns:
             np.ndarray: Нормализованная гистограмма цвета
         """
         if cv2_img is None or cv2_img.size == 0:
             return np.zeros(8*8*8, dtype=np.float32)
     
-        h, w = cv2_img.shape[:2]
-        if h * w > 20000:
-            scale = np.sqrt(20000 / (h * w))
-            new_size = (int(w * scale), int(h * scale))
-            small_img = cv2.resize(cv2_img, new_size, interpolation=cv2.INTER_LINEAR)
-        else:
-            small_img = cv2_img
+        rgb = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
 
-        rgb = cv2.cvtColor(small_img, cv2.COLOR_BGR2RGB)
-
-        hist = cv2.calcHist([rgb], [0, 1, 2], None, [6, 6, 6],
+        hist = cv2.calcHist([rgb], [0, 1, 2], None, [8, 8, 8],
                             [0, 256, 0, 256, 0, 256])
     
         cv2.normalize(hist, hist, alpha=1, beta=0, norm_type=cv2.NORM_MINMAX)
@@ -147,7 +139,7 @@ class LegoDetector:
             frame_small = frame
             scale = 1.0
     
-        res = self.detector(frame_small, conf=0.5, verbose=False)
+        res = self.detector(frame_small, verbose=False)
     
         if len(res) > 0 and len(res[0].boxes) > 0:
             b = res[0].boxes.xyxy[0].cpu().numpy().astype(int)
@@ -268,12 +260,11 @@ class LegoDetector:
 
         if target_aspect > 0:
             aspect_ratio = min(target_aspect, current_aspect) / max(target_aspect, current_aspect)
-            shape_sim = float(aspect_ratio)
+            shape_sim = float(aspect_ratio) ** 1.5
         else:
             shape_sim = 0.0
 
-        dist = cv2.compareHist(target_color_hist, cur_color_hist, cv2.HISTCMP_BHATTACHARYYA)
-        color_sim = (1 - dist) * 3
+        color_sim = cv2.compareHist(target_color_hist, cur_color_hist, cv2.HISTCMP_CORREL) * 1.5
         color_sim = float(np.clip(color_sim, 0.0, 1.0))
 
         final_sim = shape_sim * color_sim
@@ -373,7 +364,7 @@ class LegoDetector:
 
         results = list(self.detector.track(
             frame_small,
-            conf=0.6,
+            conf=0.5,
             persist=True,
             verbose=False,
             stream=True
