@@ -14,6 +14,8 @@ import numpy as np
 from tkinter.messagebox import showwarning, showerror, askyesno
 
 ctk.set_appearance_mode("dark")
+ctk.FontManager.load_font("customfont.otf")
+ctk.FontManager.load_font("Arial.ttf")
 
 class Window(ctk.CTk):
     def __init__(self) -> None:
@@ -85,11 +87,9 @@ class Window(ctk.CTk):
         command=self.reset_current_target,
         fg_color="#FF3333", 
         hover_color="#FF3333",
-        width=120,
-        height=30,
         font=("Arial", 11)
         )
-        self.reset_target_button.place(rely=0.56, relx=0.55)
+        self.reset_target_button.place(rely=0.56, relx=0.7, relwidth=0.25)
 
         settings_label = ctk.CTkLabel(self.right_frame, text="Настройки распознавания", font=("Arial", 16, "bold"))
         settings_label.place(relx=0.5, rely=0.65, anchor="n")
@@ -208,7 +208,6 @@ class Window(ctk.CTk):
     def delete_detail(self, index):
         if askyesno("Подтверждение", "Вы действительно хотите удалить деталь из базы?"):
             detail_name = self.detail_list.items[index].name
-            safe_name = self.inverted_details[detail_name]
 
             current_text = self.current_target_display.cget("text")
             if current_text == detail_name:

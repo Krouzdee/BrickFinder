@@ -36,6 +36,7 @@ class ItemCard(ctk.CTkFrame):
         self.name_label = ctk.CTkLabel(
             self,
             text=name,
+            anchor="w",
             font=ctk.CTkFont(size=14, weight="bold"),
         )
         self.name_label.grid(row=0, column=0, padx=12, pady=(12, 6), sticky="w")
