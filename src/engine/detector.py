@@ -71,25 +71,22 @@ class LegoDetector:
 
     @staticmethod
     def get_color_histogram(cv2_img: np.ndarray) -> np.ndarray:
-        """
-        Извлекает 3D гистограмму цвета для сравнения через корреляцию.
-        
-        Args:
-            cv2_img: Изображение в формате BGR
-        
-        Returns:
-            np.ndarray: Нормализованная гистограмма цвета
-        """
         if cv2_img is None or cv2_img.size == 0:
             return np.zeros(8*8*8, dtype=np.float32)
-    
-        rgb = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
 
-        hist = cv2.calcHist([rgb], [0, 1, 2], None, [8, 8, 8],
+        img = cv2_img.astype(np.float32)
+
+        sum_rgb = np.sum(img, axis=2, keepdims=True) + 1e-6
+
+        chroma_img = img / sum_rgb
+
+        chroma_img = (chroma_img * 255).astype(np.uint8)
+
+        hist = cv2.calcHist([chroma_img], [0, 1, 2], None, [8, 8, 8],
                             [0, 256, 0, 256, 0, 256])
-    
-        cv2.normalize(hist, hist, alpha=1, beta=0, norm_type=cv2.NORM_MINMAX)
-    
+
+        cv2.normalize(hist, hist, alpha=1, beta=0, norm_type=cv2.NORM_L1)
+
         return hist.flatten()
 
 
