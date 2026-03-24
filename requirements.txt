@@ -1,6 +1,4 @@
 scipy
-torchvision
-torch
 customtkinter
 darkdetect
 numpy

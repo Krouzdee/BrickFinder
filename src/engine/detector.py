@@ -14,7 +14,7 @@ class LegoDetector:
     Основной класс компьютерного зрения
     """
 
-    def __init__(self, model_path: str = 'models/lego_detector200.pt') -> None:
+    def __init__(self, model_path: str = "models/lego_detector200.pt") -> None:
         """
         Инициализация детектора.
 
@@ -23,11 +23,13 @@ class LegoDetector:
         """
         self.storage: LegoStorage = LegoStorage()
 
-        self.device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device: torch.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
 
         self.detector: YOLO = YOLO(model_path)
-        if self.device.type == 'cuda':
-            self.detector.to('cuda')
+        if self.device.type == "cuda":
+            self.detector.to("cuda")
 
         self.trackers: defaultdict = defaultdict(dict)
         self.track_id: int = 0
@@ -46,7 +48,11 @@ class LegoDetector:
         self.recompute_interval: int = 5
         self.base_font_path: Optional[str] = None
 
-        for candidate in ("arial.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+        for candidate in (
+            "arial.ttf",
+            "DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ):
             try:
                 ImageFont.truetype(candidate, 22)
                 self.base_font_path = candidate
@@ -54,25 +60,23 @@ class LegoDetector:
             except Exception:
                 continue
 
-
     def remove_background(self, cv2_img: np.ndarray) -> np.ndarray:
         """
         Обрезает 10% с каждой стороны изображения.
         """
         h, w = cv2_img.shape[:2]
-    
+
         m_h = int(h * 0.1)
         m_w = int(w * 0.1)
-    
-        cropped = cv2_img[m_h : h - m_h, m_w : w - m_w]
-    
-        return cropped
 
+        cropped = cv2_img[m_h : h - m_h, m_w : w - m_w]
+
+        return cropped
 
     @staticmethod
     def get_color_histogram(cv2_img: np.ndarray) -> np.ndarray:
         if cv2_img is None or cv2_img.size == 0:
-            return np.zeros(8*8*8, dtype=np.float32)
+            return np.zeros(8 * 8 * 8, dtype=np.float32)
 
         img = cv2_img.astype(np.float32)
 
@@ -82,20 +86,19 @@ class LegoDetector:
 
         chroma_img = (chroma_img * 255).astype(np.uint8)
 
-        hist = cv2.calcHist([chroma_img], [0, 1, 2], None, [8, 8, 8],
-                            [0, 256, 0, 256, 0, 256])
+        hist = cv2.calcHist(
+            [chroma_img], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256]
+        )
 
         cv2.normalize(hist, hist, alpha=1, beta=0, norm_type=cv2.NORM_L1)
 
         return hist.flatten()
 
-
     def _clean_cache(self) -> None:
         """Очистка устаревших записей в кэше"""
         if len(self.vector_cache) > self.cache_size:
             items = list(self.vector_cache.items())
-            self.vector_cache = dict(items[-self.cache_size // 2:])
-
+            self.vector_cache = dict(items[-self.cache_size // 2 :])
 
     @staticmethod
     def get_vector(cv2_img: np.ndarray) -> np.ndarray:
@@ -135,23 +138,25 @@ class LegoDetector:
         else:
             frame_small = frame
             scale = 1.0
-    
-        res = self.detector(frame_small, verbose=False)
-    
+
+        res = self.detector(frame_small, verbose=False, conf=0.5)
+
         if len(res) > 0 and len(res[0].boxes) > 0:
             b = res[0].boxes.xyxy[0].cpu().numpy().astype(int)
             if h * w > 640 * 480:
                 b = (b / scale).astype(int)
-            crop_original = frame[b[1]:b[3], b[0]:b[2]]
+            crop_original = frame[b[1] : b[3], b[0] : b[2]]
         else:
             crop_original = frame
-    
+
         crop_no_bg = self.remove_background(crop_original)
 
         vector = self.get_vector(crop_original)
         color_hist = self.get_color_histogram(crop_no_bg)
-    
-        img_path = self.storage.save_reference(display_name, crop_no_bg, vector, color_hist)
+
+        img_path = self.storage.save_reference(
+            display_name, crop_no_bg, vector, color_hist
+        )
         return img_path
 
     def switch_target(self, safe_name: str) -> bool:
@@ -161,9 +166,9 @@ class LegoDetector:
         data = self.storage.load_reference(safe_name)
 
         if data:
-            self.target_vector = data['vector']
-            self.target_color_hist = data['color_hist']
-            self.current_target_name = data['name']
+            self.target_vector = data["vector"]
+            self.target_color_hist = data["color_hist"]
+            self.current_target_name = data["name"]
             self.current_safe_name = safe_name
             self.vector_cache.clear()
             self.feature_cache.clear()
@@ -227,10 +232,15 @@ class LegoDetector:
             b = 0
         return b, g, r
 
-    def _process_single_box(self, box: Any, frame: np.ndarray,
-                            target_vector: np.ndarray,
-                            target_color_hist: np.ndarray,
-                            threshold: float, cur_vec: np.ndarray) -> Optional[Dict]:
+    def _process_single_box(
+        self,
+        box: Any,
+        frame: np.ndarray,
+        target_vector: np.ndarray,
+        target_color_hist: np.ndarray,
+        threshold: float,
+        cur_vec: np.ndarray,
+    ) -> Optional[Dict]:
         """
         Обработка одного бокса с использованием сравнения соотношения сторон.
         """
@@ -256,29 +266,42 @@ class LegoDetector:
         current_aspect = cur_vec[0]
 
         if target_aspect > 0:
-            aspect_ratio = min(target_aspect, current_aspect) / max(target_aspect, current_aspect)
-            shape_sim = float(aspect_ratio) ** 1.5
+            aspect_ratio = min(target_aspect, current_aspect) / max(
+                target_aspect, current_aspect
+            )
+            shape_sim = float(aspect_ratio)
         else:
             shape_sim = 0.0
 
-        color_sim = cv2.compareHist(target_color_hist, cur_color_hist, cv2.HISTCMP_CORREL) * 1.5
+        color_sim = (
+            cv2.compareHist(target_color_hist, cur_color_hist, cv2.HISTCMP_CORREL) * 1.5
+        )
         color_sim = float(np.clip(color_sim, 0.0, 1.0))
 
-        final_sim = shape_sim * color_sim
+        final_sim = (shape_sim + color_sim) / 2
         final_sim = float(np.clip(final_sim, 0.0, 1.0))
 
-        print(f"[LOG] YOLO: {yolo_conf:.3f} | Shape: {shape_sim:.3f} | Color (correlation): {color_sim:.3f} => TOTAL: {final_sim:.3f}")
+        print(
+            f"[LOG] YOLO: {yolo_conf:.3f} | Shape: {shape_sim:.3f} | Color (correlation): {color_sim:.3f} => TOTAL: {final_sim:.3f}"
+        )
 
         if final_sim >= threshold:
             return {
-                'coords': (x1, y1, x2, y2),
-                'score': final_sim,
-                'name': self.current_target_name
+                "coords": (x1, y1, x2, y2),
+                "score": final_sim,
+                "name": self.current_target_name,
             }
         return None
 
-    def _draw_label(self, frame: np.ndarray, text: str, x: int, y: int,
-                    bg_color: Tuple[int, int, int] = (0, 200, 0), alpha: float = 0.6) -> np.ndarray:
+    def _draw_label(
+        self,
+        frame: np.ndarray,
+        text: str,
+        x: int,
+        y: int,
+        bg_color: Tuple[int, int, int] = (0, 200, 0),
+        alpha: float = 0.6,
+    ) -> np.ndarray:
         """
         Рисует полупрозрачный зелёный фон и белый текст (поддерживается кириллица).
         frame: входной кадр в формате BGR (OpenCV)
@@ -318,8 +341,10 @@ class LegoDetector:
         bg_r, bg_g, bg_b = int(bg_color[2]), int(bg_color[1]), int(bg_color[0])
         alpha_byte = int(255 * float(np.clip(alpha, 0.0, 1.0)))
 
-        draw.rectangle([rect_left, rect_top, rect_right, rect_bottom],
-                       fill=(bg_r, bg_g, bg_b, alpha_byte))
+        draw.rectangle(
+            [rect_left, rect_top, rect_right, rect_bottom],
+            fill=(bg_r, bg_g, bg_b, alpha_byte),
+        )
 
         text_color = (255, 255, 255, 255)
         text_x = rect_left + pad_x
@@ -331,14 +356,16 @@ class LegoDetector:
         out_bgr = cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR)
         return out_bgr
 
-    def process_frame(self, frame: np.ndarray, threshold_percent: int = 70) -> np.ndarray:
+    def process_frame(
+        self, frame: np.ndarray, threshold_percent: int = 70
+    ) -> np.ndarray:
         """
         Главный метод обработки кадра.
-    
+
         Args:
             frame (numpy.ndarray): Исходный кадр с камеры.
             threshold_percent (int): Порог уверенности в процентах (0-100).
-    
+
         Returns:
             numpy.ndarray: Кадр с нарисованными рамками.
         """
@@ -359,13 +386,11 @@ class LegoDetector:
             frame_small = frame
             scale = 1.0
 
-        results = list(self.detector.track(
-            frame_small,
-            conf=0.5,
-            persist=True,
-            verbose=False,
-            stream=True
-        ))
+        results = list(
+            self.detector.track(
+                frame_small, conf=0.6, persist=True, verbose=False, stream=True
+            )
+        )
 
         detected_boxes: List[Dict] = []
 
@@ -391,7 +416,10 @@ class LegoDetector:
 
                 for i, tid in enumerate(tids):
 
-                    if tid in self.feature_cache and self.frame_counter % self.recompute_interval != 0:
+                    if (
+                        tid in self.feature_cache
+                        and self.frame_counter % self.recompute_interval != 0
+                    ):
                         vecs[i], hists[i] = self.feature_cache[tid]
                     else:
 
@@ -420,7 +448,6 @@ class LegoDetector:
                         vec = new_vecs[j]
                         color_hist = self.get_color_histogram(roi_no_bg)
 
-
                         self.feature_cache[tid] = (vec, color_hist)
 
                         idx = list(tids).index(tid)
@@ -439,30 +466,31 @@ class LegoDetector:
                         target_vector,
                         target_color_hist,
                         threshold,
-                        vecs[i]
+                        vecs[i],
                     )
 
                     if result:
-                        x1, y1, x2, y2 = result['coords']
+                        x1, y1, x2, y2 = result["coords"]
                         if scale != 1.0:
                             x1, y1, x2, y2 = [int(c / scale) for c in [x1, y1, x2, y2]]
 
-                        detected_boxes.append({
-                            'coords': (x1, y1, x2, y2),
-                            'score': result['score'],
-                            'name': result['name']
-                        })
+                        detected_boxes.append(
+                            {
+                                "coords": (x1, y1, x2, y2),
+                                "score": result["score"],
+                                "name": result["name"],
+                            }
+                        )
 
                 current_tids = set(tids)
                 self.feature_cache = {
-                    k: v for k, v in self.feature_cache.items()
-                    if k in current_tids
+                    k: v for k, v in self.feature_cache.items() if k in current_tids
                 }
 
         for det in detected_boxes:
-            x1, y1, x2, y2 = det['coords']
-            score = det['score']
-            name = det['name']
+            x1, y1, x2, y2 = det["coords"]
+            score = det["score"]
+            name = det["name"]
 
             conf_percent = int(round(score * 100))
             label = f"{name} {conf_percent}%"
@@ -472,12 +500,7 @@ class LegoDetector:
             cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
 
             frame = self._draw_label(
-                frame,
-                label,
-                x1,
-                y1,
-                bg_color=box_color,
-                alpha=0.7
+                frame, label, x1, y1, bg_color=box_color, alpha=0.7
             )
 
         return frame
